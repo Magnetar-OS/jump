@@ -174,6 +174,20 @@ fn title_match(title: &str, tokens: &[String]) -> f32 {
     coverage * placement
 }
 
+/// Move pinned items to the head of the list, keeping ranked order within
+/// both groups.
+///
+/// Runs *after* [`merge`]: a pin promises "when this matches at all, it is on
+/// top", not "this appears for every query" — an item that did not match is
+/// not in the list to promote.
+pub fn promote_pinned(items: &mut Vec<Item>, is_pinned: impl Fn(&crate::model::ItemKey) -> bool) {
+    let (pinned, rest): (Vec<Item>, Vec<Item>) = std::mem::take(items)
+        .into_iter()
+        .partition(|item| is_pinned(&item.key));
+    *items = pinned;
+    items.extend(rest);
+}
+
 /// Keep at most [`PER_SOURCE_CAP`] of each kind, preserving order.
 ///
 /// Without this a query matching many files returns nothing but files, even
@@ -283,6 +297,22 @@ mod tests {
 
         assert_eq!(files, PER_SOURCE_CAP);
         assert!(ranked.iter().any(|item| item.source == Source::Launcher));
+    }
+
+    #[test]
+    fn pinned_items_rise_but_only_when_present() {
+        let mut items = vec![
+            item("Alpha", Source::Launcher, 0.9),
+            item("Beta", Source::Launcher, 0.8),
+            item("Gamma", Source::Launcher, 0.7),
+        ];
+        let pinned: std::collections::HashSet<&str> = ["Gamma:1", "Beta:1", "absent:1"].into();
+
+        promote_pinned(&mut items, |key| pinned.contains(key.as_str()));
+
+        // Ranked order survives within the pinned group and the rest.
+        let titles: Vec<&str> = items.iter().map(|item| item.title.as_str()).collect();
+        assert_eq!(titles, ["Beta", "Gamma", "Alpha"]);
     }
 
     #[test]

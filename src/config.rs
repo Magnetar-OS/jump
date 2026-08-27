@@ -179,6 +179,10 @@ pub struct Config {
     /// query that matched little still ends somewhere useful. The `keyword`
     /// field is ignored here.
     pub fallbacks: Vec<jump_core::web::Link>,
+    /// Pinned result keys. When a pinned result matches a query at all, it
+    /// ranks above everything unpinned. Written by the action panel's
+    /// Pin/Unpin entries.
+    pub favorites: Vec<String>,
 }
 
 impl Default for Config {
@@ -207,6 +211,7 @@ impl Default for Config {
                         .to_owned(),
                 },
             ],
+            favorites: Vec::new(),
         }
     }
 }
@@ -252,5 +257,21 @@ impl Config {
     #[must_use]
     pub fn backdrop_opacity(&self) -> f32 {
         self.fullscreen_opacity.clamp(0.15, 0.95)
+    }
+
+    /// Persist the favorites list.
+    ///
+    /// One key, written directly: the daemon's own `watch_config`
+    /// subscription then delivers the change back like any settings-window
+    /// edit, so there is exactly one path by which configuration changes.
+    pub fn write_favorites(&self) {
+        use cosmic_config::ConfigSet;
+        let Ok(handle) = cosmic_config::Config::new(crate::APP_ID, Self::VERSION) else {
+            tracing::error!("cosmic-config unavailable; favorites not saved");
+            return;
+        };
+        if let Err(error) = handle.set("favorites", self.favorites.clone()) {
+            tracing::error!(%error, "could not write favorites");
+        }
     }
 }

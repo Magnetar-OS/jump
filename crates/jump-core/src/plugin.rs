@@ -588,6 +588,243 @@ impl PluginHost {
     }
 }
 
+/// What `lint` found. Errors stop the plugin working; warnings do not.
+#[derive(Debug, Default)]
+pub struct LintReport {
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+    /// Items the sample query produced, when it ran at all.
+    pub items: usize,
+}
+
+impl LintReport {
+    #[must_use]
+    pub fn is_clean(&self) -> bool {
+        self.errors.is_empty()
+    }
+}
+
+/// Check a plugin directory: the manifest, the commands it names, and the
+/// output of one sample query against the item schema.
+///
+/// This *runs* the plugin's query command — that is the point: the schema
+/// violations that break a plugin live in its output, not its manifest.
+pub async fn lint(directory: &Path, sample_query: &str) -> LintReport {
+    let mut report = LintReport::default();
+
+    let manifest_path = directory.join("manifest.toml");
+    let contents = match std::fs::read_to_string(&manifest_path) {
+        Ok(contents) => contents,
+        Err(error) => {
+            report
+                .errors
+                .push(format!("cannot read {}: {error}", manifest_path.display()));
+            return report;
+        }
+    };
+
+    let manifest: Manifest = match toml::from_str(&contents) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            report
+                .errors
+                .push(format!("manifest does not parse: {error}"));
+            return report;
+        }
+    };
+
+    if let Some(keyword) = manifest.keyword.as_deref() {
+        if keyword.is_empty() || keyword.contains(char::is_whitespace) {
+            report.errors.push(format!(
+                "keyword {keyword:?} must be one non-empty word — it is matched \
+                 up to the first space of the query"
+            ));
+        }
+    } else {
+        report.warnings.push(
+            "no keyword: the plugin runs on every keystroke and must answer \
+             well inside 180 ms"
+                .to_owned(),
+        );
+    }
+
+    if let Some(ms) = manifest.timeout_ms {
+        let clamped = manifest.timeout().as_millis();
+        if u128::from(ms) != clamped {
+            report
+                .warnings
+                .push(format!("timeout_ms = {ms} is clamped to {clamped} ms"));
+        }
+    }
+
+    let check_command = |report: &mut LintReport, label: &str, command: &str| {
+        let path = if Path::new(command).is_absolute() {
+            PathBuf::from(command)
+        } else {
+            directory.join(command)
+        };
+        if !path.is_file() {
+            report
+                .errors
+                .push(format!("{label} command {} does not exist", path.display()));
+            return;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let executable = path
+                .metadata()
+                .map(|meta| meta.permissions().mode() & 0o111 != 0)
+                .unwrap_or(false);
+            if !executable {
+                report.errors.push(format!(
+                    "{label} command {} is not executable (chmod +x)",
+                    path.display()
+                ));
+            }
+        }
+    };
+    check_command(&mut report, "query", &manifest.query);
+    if let Some(activate) = manifest.activate.as_deref() {
+        check_command(&mut report, "activate", activate);
+    }
+    if !report.errors.is_empty() {
+        return report;
+    }
+
+    // Run the sample query exactly the way the launcher would.
+    let plugin = Plugin {
+        manifest,
+        directory: directory.to_path_buf(),
+        id: directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("plugin")
+            .to_owned(),
+    };
+    let deadline = plugin.manifest.timeout();
+    let program = plugin.directory.join(&plugin.manifest.query);
+    let output = match tokio::time::timeout(
+        deadline,
+        Command::new(&program)
+            .arg(sample_query)
+            .current_dir(&plugin.directory)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => {
+            report
+                .errors
+                .push(format!("query command failed to run: {error}"));
+            return report;
+        }
+        Err(_) => {
+            report.errors.push(format!(
+                "query command exceeded its {} ms deadline and was killed",
+                deadline.as_millis()
+            ));
+            return report;
+        }
+    };
+
+    if !output.status.success() {
+        report.errors.push(format!(
+            "query command exited {:?}; stderr: {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+        return report;
+    }
+
+    match serde_json::from_slice::<PluginResponse>(&output.stdout) {
+        Ok(response) => {
+            report.items = response.items.len();
+            if response.items.is_empty() {
+                report
+                    .warnings
+                    .push("sample query produced no items".to_owned());
+            }
+            for item in &response.items {
+                if item.uid.is_none() {
+                    report.warnings.push(format!(
+                        "item {:?} has no uid — without one, usage ranking \
+                         cannot learn it",
+                        item.title
+                    ));
+                }
+            }
+        }
+        Err(error) => {
+            report
+                .errors
+                .push(format!("output is not valid script-filter JSON: {error}"));
+        }
+    }
+
+    report
+}
+
+/// Write a runnable plugin skeleton into `directory`.
+///
+/// Refuses to touch a directory that already exists — a scaffolder that can
+/// overwrite a real plugin is a footgun, not a convenience.
+pub fn scaffold(directory: &Path, name: &str) -> std::io::Result<()> {
+    if directory.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!("{} already exists", directory.display()),
+        ));
+    }
+    std::fs::create_dir_all(directory)?;
+
+    let keyword = name.to_lowercase().replace(char::is_whitespace, "-");
+    std::fs::write(
+        directory.join("manifest.toml"),
+        format!(
+            "name = \"{name}\"\n\
+             description = \"Describe what this plugin searches\"\n\
+             keyword = \"{keyword}\"\n\
+             query = \"./search.sh\"\n\
+             # activate = \"./open.sh\"   # separate action command, optional\n\
+             icon = \"system-search-symbolic\"\n\
+             # timeout_ms = 1000          # up to 3000 for slow keyworded plugins\n"
+        ),
+    )?;
+
+    let script = directory.join("search.sh");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\n\
+             # jump runs this with the query as $1 and reads script-filter\n\
+             # JSON from stdout. Without an `activate` command in the\n\
+             # manifest, activation re-runs this script as: search.sh\n\
+             # --activate <arg>.\n\
+             if [ \"$1\" = \"--activate\" ]; then\n\
+             \t# \"$2\" is the chosen item's arg.\n\
+             \texit 0\n\
+             fi\n\
+             \n\
+             query=\"$1\"\n\
+             printf '{{\"items\":[{{\"uid\":\"hello\",\"title\":\"Hello %s\",\
+             \"subtitle\":\"{name}\",\"arg\":\"%s\"}}]}}' \
+             \"${{query:-world}}\" \"$query\"\n"
+        ),
+    )?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -701,6 +938,41 @@ mod tests {
         let inherited = merge_variables(&response.variables, response.items[1].variables.clone());
         assert_eq!(inherited.len(), 2);
         assert!(inherited.contains(&("MODE".to_owned(), "list".to_owned())));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn scaffold_produces_a_plugin_that_lints_clean() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let directory = root.path().join("demo");
+
+        scaffold(&directory, "Demo").expect("scaffold succeeds");
+        // Refuses to overwrite what it just made.
+        assert!(scaffold(&directory, "Demo").is_err());
+
+        let report = lint(&directory, "hello").await;
+        assert!(report.is_clean(), "unexpected errors: {:?}", report.errors);
+        assert_eq!(report.items, 1);
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn lint_reports_missing_and_broken_pieces() {
+        let root = tempfile::tempdir().expect("tempdir");
+
+        // No manifest at all.
+        let report = lint(root.path(), "x").await;
+        assert!(!report.is_clean());
+
+        // A manifest naming a command that does not exist.
+        let directory = root.path().join("broken");
+        std::fs::create_dir_all(&directory).expect("dir");
+        std::fs::write(
+            directory.join("manifest.toml"),
+            "name = \"Broken\"\nkeyword = \"two words\"\nquery = \"./missing.sh\"\n",
+        )
+        .expect("manifest");
+        let report = lint(&directory, "x").await;
+        assert_eq!(report.errors.len(), 2, "{:?}", report.errors);
     }
 
     #[test]

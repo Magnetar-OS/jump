@@ -49,6 +49,8 @@ pub enum Kind {
     /// `SIGKILL` the process this result refers to — the escalation for one
     /// that ignored the polite request.
     ForceKill { pid: u32 },
+    /// Pin this result above everything unpinned, or unpin it.
+    TogglePin { key: jump_core::ItemKey },
 }
 
 /// The open panel: its actions and which one is highlighted.
@@ -59,14 +61,26 @@ pub struct Panel {
 }
 
 impl Panel {
-    /// Build the panel for `item`, or `None` when the only thing the item can
-    /// do is what Enter already does — a panel with one redundant entry is
-    /// noise, except for launcher items, whose context options arrive late.
+    /// Build the panel for `item`. `pinned` is whether the item is currently
+    /// a favorite, which flips the Pin entry to Unpin.
+    ///
+    /// Every panel now carries at least Pin next to the primary action, so —
+    /// unlike earlier versions — no source is left without one.
     #[must_use]
-    pub fn for_item(item: &Item) -> Option<Self> {
-        let actions = actions_for(item);
-        let worthwhile = actions.len() > 1 || matches!(item.source, Source::Launcher);
-        worthwhile.then_some(Self {
+    pub fn for_item(item: &Item, pinned: bool) -> Option<Self> {
+        let mut actions = actions_for(item);
+        actions.push(Action {
+            label: if pinned {
+                fl!("action-unpin")
+            } else {
+                fl!("action-pin")
+            },
+            icon: "pin-symbolic",
+            kind: Kind::TogglePin {
+                key: item.key.clone(),
+            },
+        });
+        Some(Self {
             actions,
             selected: 0,
         })
@@ -233,9 +247,12 @@ mod tests {
 
     #[test]
     fn files_offer_reveal_and_copy_path() {
-        let panel = Panel::for_item(&item(Source::File {
-            path: PathBuf::from("/home/user/notes/todo.md"),
-        }))
+        let panel = Panel::for_item(
+            &item(Source::File {
+                path: PathBuf::from("/home/user/notes/todo.md"),
+            }),
+            false,
+        )
         .expect("files have a panel");
 
         assert!(matches!(panel.actions[0].kind, Kind::Primary));
@@ -255,9 +272,12 @@ mod tests {
 
     #[test]
     fn windows_offer_close() {
-        let panel = Panel::for_item(&item(Source::Window {
-            identifier: "w1".into(),
-        }))
+        let panel = Panel::for_item(
+            &item(Source::Window {
+                identifier: "w1".into(),
+            }),
+            false,
+        )
         .expect("windows have a panel");
         assert!(
             panel
@@ -268,20 +288,34 @@ mod tests {
     }
 
     #[test]
-    fn single_action_sources_get_no_panel() {
+    fn every_panel_offers_pin_and_pinned_items_offer_unpin() {
+        let system = item(Source::System {
+            id: "dark-mode".into(),
+        });
+        let panel = Panel::for_item(&system, false).expect("system items have a panel");
+        assert!(matches!(panel.actions[0].kind, Kind::Primary));
         assert!(
-            Panel::for_item(&item(Source::System {
-                id: "dark-mode".into()
-            }))
-            .is_none()
+            panel.actions.iter().any(
+                |action| matches!(&action.kind, Kind::TogglePin { key } if key == &system.key)
+            )
+        );
+
+        // Same entry, different label when already pinned; the kind is what
+        // the update loop acts on either way.
+        let pinned = Panel::for_item(&system, true).expect("panel");
+        assert!(
+            pinned
+                .actions
+                .iter()
+                .any(|action| matches!(&action.kind, Kind::TogglePin { .. }))
         );
     }
 
     #[test]
     fn launcher_items_get_a_panel_for_late_context_options() {
         let mut panel =
-            Panel::for_item(&item(Source::Launcher)).expect("launcher items have a panel");
-        assert_eq!(panel.actions.len(), 1);
+            Panel::for_item(&item(Source::Launcher), false).expect("launcher items have a panel");
+        assert_eq!(panel.actions.len(), 2); // primary + pin
 
         panel.extend_with_context(
             7,
@@ -290,17 +324,17 @@ mod tests {
                 name: "New Window".into(),
             }],
         );
-        assert_eq!(panel.actions.len(), 2);
+        assert_eq!(panel.actions.len(), 3);
         assert!(matches!(
-            panel.actions[1].kind,
+            panel.actions[2].kind,
             Kind::LauncherContext { item: 7, option: 0 }
         ));
     }
 
     #[test]
     fn processes_offer_force_kill() {
-        let panel =
-            Panel::for_item(&item(Source::Process { pid: 1234 })).expect("processes have a panel");
+        let panel = Panel::for_item(&item(Source::Process { pid: 1234 }), false)
+            .expect("processes have a panel");
         assert!(matches!(panel.actions[0].kind, Kind::Primary));
         assert!(
             panel
@@ -312,9 +346,12 @@ mod tests {
 
     #[test]
     fn shift_saturates_at_both_ends() {
-        let mut panel = Panel::for_item(&item(Source::Window {
-            identifier: "w1".into(),
-        }))
+        let mut panel = Panel::for_item(
+            &item(Source::Window {
+                identifier: "w1".into(),
+            }),
+            false,
+        )
         .expect("panel");
 
         panel.shift(-3);

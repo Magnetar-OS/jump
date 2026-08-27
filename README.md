@@ -245,6 +245,11 @@ results and nothing else. Network-backed plugins are expected to cache.
 A working example lives in [`examples/plugins/demo/`](examples/plugins/demo/).
 Copy it to `~/.local/share/jump/plugins/demo/` and type `demo hello`.
 
+`jump plugin new <name>` scaffolds a runnable plugin into the user plugin
+directory, and `jump plugin lint <dir-or-name> [sample-query]` checks the
+manifest, the commands it names, and one sample query's output against the
+schema — by running it, under the same deadline the launcher uses.
+
 ## Layout
 
 ```

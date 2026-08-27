@@ -51,7 +51,7 @@ fit — jump's plugin format is already Alfred's script-filter contract).
 | Extensions / plugin API | ✅ | ✅ | Script-filter contract + pop-launcher plugins. ⬜ devex tooling below |
 | Extension store | ✅ | 🚫→🔶 | No store service. System-wide plugin dir (`/usr/share/jump/plugins`) ✅; curated plugin list in the repo ⬜ |
 | Per-command aliases & hotkeys | ✅ | 🔶 | CLI deep links ✅ (`jump show clip` bound to a COSMIC custom shortcut); keyword editor (aliases) ⬜ |
-| Favorites / pinned results | ✅ | ⬜ | Pin above frecency |
+| Favorites / pinned results | ✅ | ✅ | Pin on Top in the action panel; pinned matches rank above everything |
 | Fallback searches | ✅ | ✅ | `fallbacks` setting; rows appended below every search's results |
 | Menu-bar search of frontmost app | ✅ | 🚫 | No Wayland protocol exposes another client's menus; not buildable honestly |
 | Cloud sync / AI | ✅ | 🚫 | No network services in core. Config is plain files in cosmic-config — dotfile-syncable by design. AI is a plugin if anyone wants it |
@@ -80,8 +80,11 @@ keep working through the service alongside it.
 - [x] Streaming results (Alfred's `rerun`): a response naming `rerun` seconds
       (clamped 0.5–5.0) has its query re-run on that interval while the user
       is still looking at it; each answer schedules at most one rerun.
-- [ ] A `jump plugin new <name>` scaffolder and a `jump plugin lint` that
-      checks a manifest + sample output against the schema.
+- [x] `jump plugin new <name>` scaffolds a runnable keyworded plugin into
+      the user's plugin directory; `jump plugin lint <dir-or-name> [query]`
+      checks the manifest, the commands it names, and one sample query's
+      output against the item schema — by actually running it, because the
+      violations that break a plugin live in its output.
 - [x] Discovery of system-wide plugins: every `<data dir>/jump/plugins` on
       `$XDG_DATA_DIRS`, so distros can package them; the user's directory is
       searched first and shadows a packaged plugin of the same name.
@@ -189,7 +192,9 @@ second dimension of interaction on each row.
 - [ ] Per-provider result caps and the rank weights exposed as "advanced"
 - [ ] Keyword editor: override any plugin's keyword without editing its
       manifest — this is also the aliases feature
-- [ ] Favorites: pin a result above frecency, manage the list in settings
+- [x] Favorites: Pin on Top in every result's action panel; a pinned result
+      that matches the query at all ranks above everything unpinned
+      (`favorites` config key). ⬜ manage the list in the settings window.
 - [x] CLI deep links: `jump show <query>` opens with the query pre-filled,
       forwarded to the running daemon over D-Bus — a COSMIC custom shortcut
       bound to `jump show clip` is a per-command hotkey without jump owning

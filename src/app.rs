@@ -463,6 +463,14 @@ impl App {
         // below eight mediocre application matches.
         let mut items = jump_core::rank::merge(merged, &self.input, &self.frecency);
 
+        // Pinned results, when they matched at all, sit above everything.
+        let favorites = &self.config.favorites;
+        if !favorites.is_empty() {
+            jump_core::rank::promote_pinned(&mut items, |key| {
+                favorites.iter().any(|entry| entry == key.as_str())
+            });
+        }
+
         // Fallback searches close the list on every real query, so even a
         // query that matched nothing ends somewhere useful.
         if !self.input.is_empty() && !self.plugins.is_claimed(&self.input) {
@@ -940,6 +948,30 @@ impl App {
             actions::Kind::ForceKill { pid } => {
                 jump_core::process::terminate(pid, true);
                 self.dismiss()
+            }
+            actions::Kind::TogglePin { key } => {
+                // Housekeeping like Close Window: the launcher stays open and
+                // shows the new order immediately.
+                match self
+                    .config
+                    .favorites
+                    .iter()
+                    .position(|entry| entry == key.as_str())
+                {
+                    Some(position) => {
+                        self.config.favorites.remove(position);
+                    }
+                    None => self.config.favorites.push(key.as_str().to_owned()),
+                }
+                self.config.write_favorites();
+
+                let mut items = std::mem::take(&mut self.results);
+                let favorites = &self.config.favorites;
+                jump_core::rank::promote_pinned(&mut items, |key| {
+                    favorites.iter().any(|entry| entry == key.as_str())
+                });
+                self.install(items);
+                Task::none()
             }
             actions::Kind::LauncherContext { item, option } => {
                 if let Some(launcher) = self.launcher.as_ref() {
@@ -1462,7 +1494,12 @@ impl cosmic::Application for App {
                     return Task::none();
                 };
 
-                self.actions = actions::Panel::for_item(item);
+                let pinned = self
+                    .config
+                    .favorites
+                    .iter()
+                    .any(|key| key == item.key.as_str());
+                self.actions = actions::Panel::for_item(item, pinned);
                 tracing::debug!(
                     actions = self.actions.as_ref().map_or(0, |panel| panel.actions.len()),
                     "action panel opened"

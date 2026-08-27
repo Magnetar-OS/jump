@@ -26,6 +26,17 @@ fn main() -> cosmic::iced::Result {
         .with_writer(std::io::stderr)
         .init();
 
+    // `jump plugin …` is plugin tooling, not a launcher invocation: it runs
+    // and exits without touching the daemon. CLI output stays untranslated,
+    // like logs — it is grepped, piped and pasted into bug reports.
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if arguments
+        .first()
+        .is_some_and(|argument| argument == "plugin")
+    {
+        plugin_cli(&arguments[1..]);
+    }
+
     // Before the application is constructed: `fl!` is evaluated during `init`.
     jump::localize::localize();
 
@@ -64,4 +75,83 @@ fn main() -> cosmic::iced::Result {
     }
 
     cosmic::app::run_single_instance::<app::App>(settings, flags)
+}
+
+/// `jump plugin new <name>` and `jump plugin lint <dir-or-name> [query]`.
+fn plugin_cli(arguments: &[String]) -> ! {
+    let user_plugins = || {
+        dirs::data_dir()
+            .map(|dir| dir.join("jump").join("plugins"))
+            .expect("no XDG data directory")
+    };
+
+    let code = match arguments.first().map(String::as_str) {
+        Some("new") => match arguments.get(1) {
+            Some(name) => {
+                let keyword = name.to_lowercase().replace(char::is_whitespace, "-");
+                let directory = user_plugins().join(&keyword);
+                match jump_core::plugin::scaffold(&directory, name) {
+                    Ok(()) => {
+                        println!("Created {}", directory.display());
+                        println!("Try it: type “{keyword} hello” in the launcher.");
+                        println!("Check it: jump plugin lint {}", directory.display());
+                        0
+                    }
+                    Err(error) => {
+                        eprintln!("error: {error}");
+                        1
+                    }
+                }
+            }
+            None => {
+                eprintln!("usage: jump plugin new <name>");
+                2
+            }
+        },
+
+        Some("lint") => match arguments.get(1) {
+            Some(target) => {
+                // A path is used as given; a bare name is looked up in the
+                // user's plugin directory.
+                let mut directory = std::path::PathBuf::from(target);
+                if !directory.is_dir() {
+                    directory = user_plugins().join(target);
+                }
+                let sample = arguments.get(2).map_or("test", String::as_str);
+
+                let runtime = tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .expect("tokio runtime");
+                let report = runtime.block_on(jump_core::plugin::lint(&directory, sample));
+
+                for error in &report.errors {
+                    println!("error: {error}");
+                }
+                for warning in &report.warnings {
+                    println!("warning: {warning}");
+                }
+                if report.is_clean() {
+                    println!(
+                        "ok: {} — sample query {sample:?} produced {} item(s)",
+                        directory.display(),
+                        report.items
+                    );
+                    0
+                } else {
+                    1
+                }
+            }
+            None => {
+                eprintln!("usage: jump plugin lint <directory-or-name> [sample-query]");
+                2
+            }
+        },
+
+        _ => {
+            eprintln!("usage: jump plugin new <name> | jump plugin lint <dir-or-name> [query]");
+            2
+        }
+    };
+    std::process::exit(code)
 }
