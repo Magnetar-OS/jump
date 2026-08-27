@@ -38,21 +38,21 @@ fit — jump's plugin format is already Alfred's script-filter contract).
 | Full-text file search | 🔶 | ✅ | FTS5, opt-in, ahead of Raycast here |
 | Clipboard history | ✅ | 🔶 | Text only today. ⬜ images (grid view), ⬜ paste-into-frontmost (needs virtual-keyboard or data-control paste path) |
 | Snippets / text expansion | ✅ | ⬜ | Depends on `zwp_virtual_keyboard_v1` on cosmic-comp — investigate before promising |
-| Quicklinks (URL templates) | ✅ | ⬜ | Fits the plugin format; ship as bundled plugins |
+| Quicklinks (URL templates) | ✅ | ✅ | `quicklinks` setting: keyworded URL templates, claiming the query; simpler than bundling plugins and live-reloads with the config store |
 | Window switching | ✅ | ✅ | `ext-foreign-toplevel-list`, merged into search, Ctrl+W closes |
 | Window management commands | ✅ | ⬜ | maximize / minimize / move-to-workspace via `cosmic-toplevel-management`; tiling toggle via cosmic-comp config — investigate protocol coverage first |
 | System commands | ✅ | ✅ | Dark/light toggle, Settings deep links; session commands via pop-launcher |
-| Media control | ✅ | ✅ | MPRIS play/pause/next/prev. ⬜ "what's playing" in subtitles |
+| Media control | ✅ | ✅ | MPRIS play/pause/next/prev, current track in the subtitle |
 | Power profiles | — | ✅ | power-profiles-daemon |
-| Emoji & symbol picker | ✅ | ⬜ | Data file, no daemon; grid view |
+| Emoji & symbol picker | ✅ | 🔶 | `emoji …` keyword over compiled-in data; list view today, grid view pending (pillar 3) |
 | Process search + kill | ✅ | ✅ | `kill …` claims the query; SIGTERM on Enter, Force Kill in the action panel |
 | Bluetooth / Wi-Fi control | ✅ | ⬜ | bluez connect/disconnect; NetworkManager network switching |
 | Action panel (⌘K) | ✅ | ✅ | Ctrl+K, keyboard-first. ⬜ v2: plugin `mods`, per-action shortcuts shown |
 | Extensions / plugin API | ✅ | ✅ | Script-filter contract + pop-launcher plugins. ⬜ devex tooling below |
-| Extension store | ✅ | 🚫→⬜ | No store service. ⬜ distro-packageable system-wide plugin dir + a curated plugin list in the repo |
-| Per-command aliases & hotkeys | ✅ | ⬜ | Keyword editor (aliases); CLI deep links (`jump show clip`) so COSMIC custom shortcuts become per-command hotkeys |
+| Extension store | ✅ | 🚫→🔶 | No store service. System-wide plugin dir (`/usr/share/jump/plugins`) ✅; curated plugin list in the repo ⬜ |
+| Per-command aliases & hotkeys | ✅ | 🔶 | CLI deep links ✅ (`jump show clip` bound to a COSMIC custom shortcut); keyword editor (aliases) ⬜ |
 | Favorites / pinned results | ✅ | ⬜ | Pin above frecency |
-| Fallback searches | ✅ | ⬜ | "Search web for …" rows when nothing matches |
+| Fallback searches | ✅ | ✅ | `fallbacks` setting; rows appended below every search's results |
 | Menu-bar search of frontmost app | ✅ | 🚫 | No Wayland protocol exposes another client's menus; not buildable honestly |
 | Cloud sync / AI | ✅ | 🚫 | No network services in core. Config is plain files in cosmic-config — dotfile-syncable by design. AI is a plugin if anyone wants it |
 
@@ -79,9 +79,13 @@ keep working through the service alongside it.
 - [ ] Streaming results (rerun-on-interval, Alfred's `rerun`).
 - [ ] A `jump plugin new <name>` scaffolder and a `jump plugin lint` that
       checks a manifest + sample output against the schema.
-- [ ] Discovery of system-wide plugins (`/usr/share/jump/plugins`) so distros
-      can package them.
-- [ ] Bundled quicklinks plugin: user-defined URL templates with `{query}`.
+- [x] Discovery of system-wide plugins: every `<data dir>/jump/plugins` on
+      `$XDG_DATA_DIRS`, so distros can package them; the user's directory is
+      searched first and shadows a packaged plugin of the same name.
+- [x] Quicklinks: user-defined URL templates with `{query}` — landed as the
+      `quicklinks` config key rather than bundled plugins, because a config
+      list live-reloads, needs no scripts on disk, and the settings window
+      can grow an editor for it (pillar 4).
 - [ ] Curated plugin list in the repository (the store, without a service).
 - [ ] Import: Alfred workflow converter — script filters map nearly 1:1.
 
@@ -108,8 +112,9 @@ flow through the bridge).
 - [x] power-profiles-daemon: Performance / Balanced / Power Saver commands,
       writing the same `ActiveProfile` property `powerprofilesctl set` does.
       Offered only when the daemon's tooling is installed.
-- [ ] "What's playing" inline in the media commands' subtitles (needs async
-      results on the match path)
+- [x] "What's playing" inline in the media commands' subtitles: fetched off
+      the frame when the overlay opens, re-running a visible search when the
+      answer arrives — the match path itself stays synchronous.
 - [ ] Window management commands over `cosmic-toplevel-management`:
       maximize, minimize, move to workspace — investigate which requests
       cosmic-comp actually honours from a third-party client before listing
@@ -121,11 +126,14 @@ flow through the bridge).
       offers Force Kill. The claim also stops the query fanning out to the
       other providers — the file search's own `plocate` child used to match
       the kill query it was spawned by and eat the signal.
-- [ ] Emoji and unicode search (a data file, no daemon)
+- [x] Emoji search: `emoji …` claims the query, matches CLDR names and
+      shortcodes from compiled-in data (no daemon, no I/O), Enter copies.
+      List view today; the grid presentation is pillar 3.
 - [ ] Clipboard images: capture non-text offers over `wlr-data-control`,
       thumbnail in a grid, copy back on Enter
-- [ ] Fallback searches: configurable "Search the web for …" rows when a
-      query matches nothing
+- [x] Fallback searches: configurable "Search the web for …" rows appended
+      below every ordinary search's results (`fallbacks`, DuckDuckGo and
+      Wikipedia by default)
 - [ ] Snippet expansion — needs a virtual keyboard protocol; investigate
       `zwp_virtual_keyboard_v1` on cosmic-comp before promising it
 
@@ -179,9 +187,10 @@ second dimension of interaction on each row.
 - [ ] Keyword editor: override any plugin's keyword without editing its
       manifest — this is also the aliases feature
 - [ ] Favorites: pin a result above frecency, manage the list in settings
-- [ ] CLI deep links: `jump show <query>` maps a COSMIC custom shortcut to a
-      pre-filled query ("open straight into clipboard history") — per-command
-      hotkeys without owning global keybinding state
+- [x] CLI deep links: `jump show <query>` opens with the query pre-filled,
+      forwarded to the running daemon over D-Bus — a COSMIC custom shortcut
+      bound to `jump show clip` is a per-command hotkey without jump owning
+      any global keybinding state
 - [ ] Frecency inspector ("why is this ranked here?") and a reset button
 - [ ] First-run experience: a short, dismissable hint row (bind a shortcut,
       try Ctrl+K) instead of an empty launchpad with no explanation
@@ -201,21 +210,21 @@ the long tail that separates "works" from "indistinguishable from first-party":
       Weblate expects
 - [x] justfile with `rootdir` / `prefix` / `cargo-target-dir`, vendoring for
       offline packaging builds
-- [ ] `rust-toolchain.toml` agreeing with `rust-version`, plus `rustfmt.toml`
-      (`imports_granularity = "Module"`) — adopt before the tree grows
+- [x] `rust-toolchain.toml` agreeing with `rust-version` (1.98.0), plus
+      `rustfmt.toml` (`imports_granularity = "Module"`)
 - [ ] Sweep for hardcoded user-visible strings; everything through `fl!` so
       translation PRs are additive. Plurals through Fluent, never `format!`
-- [ ] Metainfo completeness: `com.system76.CosmicApplication` provides,
-      `requires`/`supports`, `branding` colors, release entries matching
-      Cargo.toml, reachable URLs; `desktop-file-validate` +
-      `appstreamcli validate` in CI (`--no-net` on PRs)
-- [ ] Per-size icons under `hicolor/<size>/apps/` (small sizes drawn on the
-      pixel grid), symbolic icon for the applet and tray
+- [x] Metainfo validated in CI: `desktop-file-validate` + `appstreamcli
+      validate --no-net` run in the metadata job (and locally via
+      `just validate`). ⬜ remaining completeness: `branding` colors and a
+      `vcs-browser` URL.
+- [x] Per-size icons under `hicolor/<size>/apps/` (16–256 ship already).
+      ⬜ a `-symbolic` variant for the applet and tray.
 - [ ] xdgen decision: adopt (with the `CARGO_TARGET_DIR` fix) or document the
       rejection — Peek found it broke single-instance via feature
       re-resolution, so verify before adopting
-- [ ] `hooks/pre-commit.hook` running `cargo fmt --check`, as the shipping
-      apps do
+- [x] `hooks/pre-commit.hook` running `cargo fmt --check`, as the shipping
+      apps do (`git config core.hooksPath hooks`)
 - [ ] Track libcosmic's default branch deliberately: a recurring
       `cargo update -p libcosmic` + build + smoke-test routine, because
       unpinned-git-dependency breakage should be found by us, not packagers
@@ -230,17 +239,15 @@ makes the quality claims *verifiable* instead of asserted.
       GPL-3.0-only COSMIC frontend, so a GNOME frontend can link it
 - [x] Release profile tuned for cold start (fat LTO, one codegen unit,
       stripped); dev profile keeps dependencies optimised for dogfooding
-- [ ] Initial commit and repository hygiene: the tree is `git init`ed but has
-      no history yet — land the initial commit, then conventional commits
-      from there
-- [ ] CI: build + `cargo clippy --all-features --locked -- -W clippy::pedantic`
-      + `cargo test` + metadata validation, toolchain taken from
-      `rust-toolchain.toml`. A vendored offline build in CI too, so
-      `just vendor` never rots
-- [ ] Test coverage where the logic is: `rank.rs` cross-source merging,
-      `frecency.rs` decay, `plugin.rs` protocol conformance (manifest
-      parsing, deadline kill, output caps), file-ranking phase one (pure
-      string scoring — trivially testable), clipboard capping/permissions
+- [x] Initial commit and repository hygiene: history starts at the initial
+      import, conventional commits from there
+- [x] CI: fmt + clippy pedantic + tests + metadata validation, toolchain
+      taken from `rust-toolchain.toml`, plus a vendored offline resolution
+      job so `just vendor` never rots (`.github/workflows/ci.yml`)
+- [x] Test coverage where the logic is: `rank.rs` cross-source merging,
+      `frecency.rs` decay, `plugin.rs` protocol conformance and discovery,
+      file-ranking phase one, clipboard capping/permissions, emoji and web
+      link matching — 79 tests across engine and frontend
 - [ ] Performance budgets, measured in CI or a `just bench` recipe, not
       remembered: keybind → first frame (the number the launcher is judged
       on), keystroke → results painted (pop-launcher answers in 0.5–1.5 ms;

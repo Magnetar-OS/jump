@@ -46,10 +46,22 @@ fn main() -> cosmic::iced::Result {
 
     // `run_single_instance` claims the D-Bus name; a second invocation is
     // delivered to the running daemon as an activation, which the app turns
-    // into a toggle. That makes `jump` itself the keybinding command.
-    let flags = app::Flags {
-        daemon: std::env::args().any(|argument| argument == "--daemon"),
-    };
+    // into a toggle. That makes `jump` itself the keybinding command, and
+    // `jump show <query>` a deep link into a pre-filled search — bind it to a
+    // COSMIC custom shortcut for a per-command hotkey.
+    let mut flags = app::Flags::default();
+    let mut arguments = std::env::args().skip(1);
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--daemon" => flags.daemon = true,
+            "show" => {
+                flags.action = Some(app::ACTION_SHOW.to_owned());
+                flags.args = arguments.collect();
+                break;
+            }
+            other => tracing::warn!(argument = other, "ignoring unknown argument"),
+        }
+    }
 
     cosmic::app::run_single_instance::<app::App>(settings, flags)
 }

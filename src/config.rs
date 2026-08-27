@@ -171,6 +171,14 @@ pub struct Config {
     pub disabled_plugins: Vec<String>,
     /// File-search settings.
     pub files: FileConfig,
+    /// Keyworded URL templates. `yt cats` opens the `yt` link's template with
+    /// `{query}` replaced by `cats`, claiming the query the way a plugin
+    /// keyword does.
+    pub quicklinks: Vec<jump_core::web::Link>,
+    /// Web searches appended below the results of an ordinary search, so a
+    /// query that matched little still ends somewhere useful. The `keyword`
+    /// field is ignored here.
+    pub fallbacks: Vec<jump_core::web::Link>,
 }
 
 impl Default for Config {
@@ -185,6 +193,20 @@ impl Default for Config {
             grid_max_width: 0.72,
             disabled_plugins: Vec::new(),
             files: FileConfig::default(),
+            quicklinks: Vec::new(),
+            fallbacks: vec![
+                jump_core::web::Link {
+                    name: "DuckDuckGo".to_owned(),
+                    keyword: String::new(),
+                    template: "https://duckduckgo.com/?q={query}".to_owned(),
+                },
+                jump_core::web::Link {
+                    name: "Wikipedia".to_owned(),
+                    keyword: String::new(),
+                    template: "https://en.wikipedia.org/wiki/Special:Search?search={query}"
+                        .to_owned(),
+                },
+            ],
         }
     }
 }

@@ -77,7 +77,11 @@ struct Command {
 ///
 /// Small enough (a few dozen entries) that rebuilding beats caching plus the
 /// invalidation story caching would need.
-fn commands() -> Vec<Command> {
+///
+/// `now_playing` is the current track, shown as the media commands' subtitle
+/// when known — [`now_playing`] fetches it off the frame when the overlay
+/// opens, because a bus round trip must never run on the match path.
+fn commands(now_playing: Option<&str>) -> Vec<Command> {
     let settings = |id, title: String, page, icon, keywords| Command {
         id,
         title,
@@ -180,7 +184,10 @@ fn commands() -> Vec<Command> {
     let media = |id, title: String, icon, keywords, task| Command {
         id,
         title,
-        subtitle: fl!("system-media-subtitle"),
+        // The track that is actually playing beats a generic caption; the
+        // caption stays for the moment before the async answer arrives and
+        // for sessions with no player at all.
+        subtitle: now_playing.map_or_else(|| fl!("system-media-subtitle"), ToOwned::to_owned),
         icon,
         keywords,
         action: Action::Background(task),
@@ -296,10 +303,10 @@ fn match_score(command: &Command, tokens: &[String]) -> f32 {
 
 /// Commands matching `query`, as pre-scored [`Item`]s ready to merge.
 #[must_use]
-pub fn matching(query: &str) -> Vec<Item> {
+pub fn matching(query: &str, now_playing: Option<&str>) -> Vec<Item> {
     let tokens: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
 
-    commands()
+    commands(now_playing)
         .into_iter()
         .filter_map(|command| {
             let score = match_score(&command, &tokens);
@@ -327,7 +334,7 @@ pub fn matching(query: &str) -> Vec<Item> {
 
 /// What running the command at `id` amounts to.
 pub fn run(id: &str) -> Option<Outcome> {
-    let action = commands()
+    let action = commands(None)
         .into_iter()
         .find(|command| command.id == id)
         .map(|command| command.action)?;
@@ -404,6 +411,85 @@ async fn media_call(method: &str) -> zbus::Result<()> {
     Ok(())
 }
 
+/// What the most relevant MPRIS player is playing, as "Artist — Title".
+///
+/// `None` when no player is running or the metadata names no track. Failures
+/// degrade to `None` rather than an error: a missing subtitle is the correct
+/// rendering of "nothing is playing".
+pub async fn now_playing() -> Option<String> {
+    match fetch_now_playing().await {
+        Ok(track) => track,
+        Err(error) => {
+            tracing::debug!(%error, "could not read player metadata");
+            None
+        }
+    }
+}
+
+async fn fetch_now_playing() -> zbus::Result<Option<String>> {
+    let connection = zbus::Connection::session().await?;
+
+    let bus = zbus::fdo::DBusProxy::new(&connection).await?;
+    let names: Vec<String> = bus
+        .list_names()
+        .await?
+        .into_iter()
+        .map(|name| name.to_string())
+        .collect();
+
+    let mut players = Vec::new();
+    for name in names.iter().filter(|name| is_player(name)) {
+        let proxy = zbus::Proxy::new(
+            &connection,
+            name.as_str().to_owned(),
+            "/org/mpris/MediaPlayer2",
+            "org.mpris.MediaPlayer2.Player",
+        )
+        .await?;
+        let status: String = proxy
+            .get_property("PlaybackStatus")
+            .await
+            .unwrap_or_default();
+        players.push((proxy, status));
+    }
+
+    let Some(index) = pick_player(
+        &players
+            .iter()
+            .map(|(_, status)| status.as_str())
+            .collect::<Vec<_>>(),
+    ) else {
+        return Ok(None);
+    };
+
+    let metadata: std::collections::HashMap<String, zbus::zvariant::OwnedValue> = players[index]
+        .0
+        .get_property("Metadata")
+        .await
+        .unwrap_or_default();
+
+    let title = metadata
+        .get("xesam:title")
+        .and_then(|value| String::try_from(value.try_clone().ok()?).ok())
+        .filter(|title| !title.is_empty());
+    let artists: Vec<String> = metadata
+        .get("xesam:artist")
+        .and_then(|value| Vec::<String>::try_from(value.try_clone().ok()?).ok())
+        .unwrap_or_default();
+
+    Ok(format_track(title, &artists))
+}
+
+/// "Artist — Title", degrading to the title alone; `None` without a title.
+fn format_track(title: Option<String>, artists: &[String]) -> Option<String> {
+    let title = title?;
+    let artist = artists.iter().find(|artist| !artist.is_empty());
+    Some(match artist {
+        Some(artist) => format!("{artist} — {title}"),
+        None => title,
+    })
+}
+
 /// Whether a bus name belongs to a real player.
 ///
 /// `playerctld` is a controller that proxies whichever player was last active;
@@ -470,7 +556,7 @@ mod tests {
 
     fn score_for(query: &str, id: &str) -> f32 {
         let tokens: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
-        commands()
+        commands(None)
             .into_iter()
             .find(|command| command.id == id)
             .map(|command| match_score(&command, &tokens))
@@ -491,13 +577,40 @@ mod tests {
 
     #[test]
     fn unrelated_queries_match_nothing() {
-        assert!(matching("firefox").is_empty());
-        assert!(matching("").is_empty());
+        assert!(matching("firefox", None).is_empty());
+        assert!(matching("", None).is_empty());
     }
 
     #[test]
     fn strict_threshold_holds_back_single_letters() {
-        assert!(matching("d").is_empty());
+        assert!(matching("d", None).is_empty());
+    }
+
+    #[test]
+    fn now_playing_becomes_the_media_subtitle() {
+        let items = matching("play", Some("Boards of Canada — Roygbiv"));
+        let media = items
+            .iter()
+            .find(|item| matches!(&item.source, Source::System { id } if id == "media-play-pause"))
+            .expect("play matches the media command");
+        assert_eq!(media.subtitle, "Boards of Canada — Roygbiv");
+    }
+
+    #[test]
+    fn track_formatting_degrades_gracefully() {
+        assert_eq!(
+            format_track(Some("Roygbiv".into()), &["Boards of Canada".into()]),
+            Some("Boards of Canada — Roygbiv".into())
+        );
+        assert_eq!(
+            format_track(Some("Roygbiv".into()), &[]),
+            Some("Roygbiv".into())
+        );
+        assert_eq!(
+            format_track(Some("Roygbiv".into()), &[String::new()]),
+            Some("Roygbiv".into())
+        );
+        assert_eq!(format_track(None, &["Someone".into()]), None);
     }
 
     #[test]

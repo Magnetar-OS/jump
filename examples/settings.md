@@ -32,7 +32,27 @@ so a bad value can never stop the launcher from opening.
 | `grid_layout` | `fullscreen` \| `panel` | `fullscreen` | Launchpad layout |
 | `cell_size` | float | `158.0` | Target grid cell width; drives icon size |
 | `grid_max_width` | float | `0.72` | Fraction of the display the grid may span |
+| `disabled_plugins` | list of strings | `[]` | Plugin directory names switched off |
+| `quicklinks` | list of links | `[]` | Keyworded URL templates, see below |
+| `fallbacks` | list of links | DuckDuckGo, Wikipedia | Web searches appended below every search |
 | `files` | struct | see below | File search |
+
+### `quicklinks` and `fallbacks`
+
+Both hold the same link shape; `{query}` in the template is replaced with the
+percent-encoded query.
+
+```ron
+[
+    (name: "YouTube", keyword: "yt", template: "https://www.youtube.com/results?search_query={query}"),
+]
+```
+
+A **quicklink**'s keyword claims the query the way a plugin keyword does:
+`yt cats` opens a YouTube search and nothing else answers. A **fallback** has
+no keyword (the field is ignored); fallbacks are appended below the results of
+every ordinary search, in configuration order, so a query that matched nothing
+still ends somewhere useful. Set `fallbacks` to `[]` to turn the rows off.
 
 ### `files`
 

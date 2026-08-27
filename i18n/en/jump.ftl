@@ -4,6 +4,14 @@ app-description = Search applications, windows, files, and clipboard
 # The query field's placeholder.
 type-to-search = Search
 
+# A quicklink or fallback web-search row. { $name } is the site ("DuckDuckGo"),
+# { $query } is what the user typed.
+web-search-for = Search { $name } for “{ $query }”
+web-search-subtitle = Web search
+
+# Subtitle of an emoji result; Enter copies the emoji.
+emoji-copy-subtitle = Copy to clipboard
+
 ## Status-area menu
 tray-search = Search…
 tray-applications = Applications
@@ -67,6 +75,7 @@ action-open = Open
 action-open-folder = Open Enclosing Folder
 action-copy-path = Copy Path
 action-copy = Copy
+action-copy-link = Copy Link
 action-trash = Move to Trash
 action-run = Run
 action-switch-window = Switch to Window

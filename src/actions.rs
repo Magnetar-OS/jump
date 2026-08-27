@@ -162,6 +162,15 @@ fn actions_for(item: &Item) -> Vec<Action> {
             },
         ],
 
+        Source::Url { url } => vec![
+            primary(fl!("action-open"), "web-browser-symbolic"),
+            Action {
+                label: fl!("action-copy-link"),
+                icon: "edit-copy-symbolic",
+                kind: Kind::CopyText(url.clone()),
+            },
+        ],
+
         Source::Plugin { .. } | Source::System { .. } => {
             vec![primary(fl!("action-run"), "system-run-symbolic")]
         }

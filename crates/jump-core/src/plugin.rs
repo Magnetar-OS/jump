@@ -337,66 +337,102 @@ pub struct PluginHost {
 }
 
 impl PluginHost {
-    /// Discover plugins in the user's data directory.
+    /// Discover plugins in the user's data directory and the system data
+    /// directories (`$XDG_DATA_DIRS`, so distro packages under
+    /// `/usr/share/jump/plugins` are picked up with no configuration).
+    ///
+    /// The user's directory is searched first and wins on an id collision, so
+    /// copying a packaged plugin into `~/.local/share/jump/plugins` to modify
+    /// it shadows the packaged one rather than duplicating it.
+    #[must_use]
+    pub fn discover() -> Self {
+        let mut roots: Vec<PathBuf> = dirs::data_dir()
+            .map(|dir| dir.join("jump").join("plugins"))
+            .into_iter()
+            .collect();
+
+        let system = std::env::var_os("XDG_DATA_DIRS")
+            .filter(|value| !value.is_empty())
+            .map_or_else(
+                || {
+                    vec![
+                        PathBuf::from("/usr/local/share"),
+                        PathBuf::from("/usr/share"),
+                    ]
+                },
+                |value| std::env::split_paths(&value).collect(),
+            );
+        roots.extend(
+            system
+                .into_iter()
+                .map(|dir| dir.join("jump").join("plugins")),
+        );
+
+        Self::discover_in(&roots)
+    }
+
+    /// Discover plugins under `roots`, earlier roots shadowing later ones.
     ///
     /// Directories without a readable manifest are skipped with a warning; a
     /// malformed plugin must never prevent the launcher from starting.
     #[must_use]
-    pub fn discover() -> Self {
-        let Some(root) = dirs::data_dir().map(|dir| dir.join("jump").join("plugins")) else {
-            return Self::default();
-        };
+    pub fn discover_in(roots: &[PathBuf]) -> Self {
+        let mut plugins: Vec<Plugin> = Vec::new();
 
-        let entries = match std::fs::read_dir(&root) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Self::default();
-            }
-            Err(error) => {
-                tracing::warn!(%error, ?root, "failed to read plugin directory");
-                return Self::default();
-            }
-        };
-
-        let mut plugins = Vec::new();
-        for entry in entries.flatten() {
-            let directory = entry.path();
-            if !directory.is_dir() {
-                continue;
-            }
-
-            let manifest_path = directory.join("manifest.toml");
-            let contents = match std::fs::read_to_string(&manifest_path) {
-                Ok(contents) => contents,
+        for root in roots {
+            let entries = match std::fs::read_dir(root) {
+                Ok(entries) => entries,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(error) => {
-                    tracing::warn!(%error, ?manifest_path, "failed to read plugin manifest");
+                    tracing::warn!(%error, ?root, "failed to read plugin directory");
                     continue;
                 }
             };
 
-            let manifest: Manifest = match toml::from_str(&contents) {
-                Ok(manifest) => manifest,
-                Err(error) => {
-                    tracing::warn!(%error, ?manifest_path, "invalid plugin manifest");
+            for entry in entries.flatten() {
+                let directory = entry.path();
+                if !directory.is_dir() {
                     continue;
                 }
-            };
 
-            let Some(id) = directory
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(ToOwned::to_owned)
-            else {
-                continue;
-            };
+                let Some(id) = directory
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(ToOwned::to_owned)
+                else {
+                    continue;
+                };
 
-            tracing::info!(plugin = %id, keyword = ?manifest.keyword, "loaded plugin");
-            plugins.push(Plugin {
-                manifest,
-                directory,
-                id,
-            });
+                if plugins.iter().any(|plugin| plugin.id == id) {
+                    tracing::debug!(plugin = %id, ?directory, "shadowed by an earlier root");
+                    continue;
+                }
+
+                let manifest_path = directory.join("manifest.toml");
+                let contents = match std::fs::read_to_string(&manifest_path) {
+                    Ok(contents) => contents,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => {
+                        tracing::warn!(%error, ?manifest_path, "failed to read plugin manifest");
+                        continue;
+                    }
+                };
+
+                let manifest: Manifest = match toml::from_str(&contents) {
+                    Ok(manifest) => manifest,
+                    Err(error) => {
+                        tracing::warn!(%error, ?manifest_path, "invalid plugin manifest");
+                        continue;
+                    }
+                };
+
+                tracing::info!(plugin = %id, keyword = ?manifest.keyword, "loaded plugin");
+                plugins.push(Plugin {
+                    manifest,
+                    directory,
+                    id,
+                });
+            }
         }
 
         Self {
@@ -560,6 +596,40 @@ mod tests {
         assert_eq!(response.items[0].uid.as_deref(), Some("repo"));
         assert_eq!(response.items[0].autocomplete.as_deref(), Some("gh jump "));
         assert_eq!(response.items[1].uid, None);
+    }
+
+    #[test]
+    fn discovery_walks_roots_in_order_and_user_shadows_system() {
+        let user = tempfile::tempdir().expect("tempdir");
+        let system = tempfile::tempdir().expect("tempdir");
+
+        let write = |root: &std::path::Path, id: &str, name: &str| {
+            let dir = root.join(id);
+            std::fs::create_dir_all(&dir).expect("plugin dir");
+            std::fs::write(
+                dir.join("manifest.toml"),
+                format!("name = \"{name}\"\nquery = \"./q\"\n"),
+            )
+            .expect("manifest");
+        };
+
+        write(user.path(), "shared", "User copy");
+        write(user.path(), "mine", "User only");
+        write(system.path(), "shared", "System copy");
+        write(system.path(), "packaged", "System only");
+        // A directory without a manifest is not a plugin.
+        std::fs::create_dir_all(system.path().join("junk")).expect("junk dir");
+
+        let host =
+            PluginHost::discover_in(&[user.path().to_path_buf(), system.path().to_path_buf()]);
+
+        let mut ids: Vec<&str> = host.all().map(|(plugin, _)| plugin.id.as_str()).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, ["mine", "packaged", "shared"]);
+
+        // The user's copy shadowed the packaged one.
+        let shared = host.get("shared").expect("shared plugin");
+        assert_eq!(shared.manifest.name, "User copy");
     }
 
     #[test]

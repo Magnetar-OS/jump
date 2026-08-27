@@ -84,6 +84,7 @@ fn source_kind(source: &Source) -> u8 {
         Source::Clipboard { .. } => 4,
         Source::System { .. } => 5,
         Source::Process { .. } => 6,
+        Source::Url { .. } => 7,
     }
 }
 
@@ -126,6 +127,11 @@ fn base_score(item: &Item, tokens: &[String]) -> f32 {
         // is claimed and this scale is not consulted; a value keeps the match
         // exhaustive and honest if that ever changes.
         Source::Process { .. } => 1.0,
+
+        // Quicklinks claim the query outright and fallbacks are appended
+        // below the merged list, so this scale is normally not consulted;
+        // carrying the pre-set score keeps the match exhaustive.
+        Source::Url { .. } => item.score.clamp(0.0, 1.0),
     }
 }
 

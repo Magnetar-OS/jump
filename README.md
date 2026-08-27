@@ -30,7 +30,14 @@ Working and dogfoodable on COSMIC 1.5. Verified on a live session:
   Settings pages ("wifi" opens the network page)
 - Action panel on Ctrl+K: reveal a file, copy its path, trash it, close a
   window, run an application's desktop actions
-- Media control (play/pause, next, previous) and power-profile switching
+- Media control (play/pause, next, previous) with the current track shown,
+  and power-profile switching
+- Process search and kill behind the `kill` keyword; emoji search behind
+  `emoji`, Enter copies
+- Quicklinks (keyworded URL templates) and fallback web-search rows below
+  every search's results
+- `jump show <query>` opens with the query pre-filled, so a COSMIC custom
+  shortcut can deep-link into e.g. clipboard history
 - Process search behind the `kill` keyword — SIGTERM on Enter, Force Kill in
   the action panel
 
@@ -184,8 +191,12 @@ installed under `/usr/lib/pop-launcher/plugins` or
 `~/.local/share/pop-launcher/plugins` appears in results with no extra work.
 
 **jump plugins** are for the cases where implementing pop-launcher's stateful
-IPC protocol is more than a shell script should have to do. A manifest plus an
-executable that takes the query on argv and prints JSON:
+IPC protocol is more than a shell script should have to do. They are
+discovered in `~/.local/share/jump/plugins` and in every `<dir>/jump/plugins`
+on `$XDG_DATA_DIRS` (so a distribution can package one into
+`/usr/share/jump/plugins`; a user plugin shadows a packaged plugin with the
+same directory name). A manifest plus an executable that takes the query on
+argv and prints JSON:
 
 ```
 ~/.local/share/jump/plugins/github/
@@ -297,7 +308,6 @@ removes the icon, so a missing host is handled as normal rather than as an error
 
 ## Known rough edges
 
-- Not a git repository yet, and no CI.
 - First-run content indexing has not been timed to completion. Priority ordering
   means the useful documents land first, but the full pass is slow.
 - In a light theme the accent-tinted selection reads pink; it likely wants a

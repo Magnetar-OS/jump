@@ -35,6 +35,7 @@ use crate::anim::Panel;
 use crate::surface::{self, GridMetrics, Mode};
 use crate::system;
 use crate::view;
+use jump::fl;
 
 /// Identifier for the query input, so focus can be restored on every open.
 pub const INPUT_ID: &str = "jump-query";
@@ -42,9 +43,9 @@ pub const INPUT_ID: &str = "jump-query";
 /// Startup flags.
 ///
 /// `run_single_instance` requires this to implement [`CosmicFlags`] because it
-/// forwards a second invocation's argv to the running daemon. `jump` takes no
-/// arguments — the invocation itself is the whole message — so the associated
-/// types exist only to satisfy the bound.
+/// forwards a second invocation's argv to the running daemon: a bare `jump`
+/// arrives as a plain activation (the toggle gesture), and `jump show <query>`
+/// arrives as an `ActivateAction` carrying the query.
 #[derive(Debug, Clone, Default)]
 pub struct Flags {
     /// Start without showing the overlay.
@@ -53,12 +54,31 @@ pub struct Flags {
     /// launcher over the user's session the moment they log in would be
     /// actively hostile. A later invocation with no flag toggles it.
     pub daemon: bool,
+    /// Subcommand forwarded to the running daemon — `show`, today.
+    pub action: Option<String>,
+    /// The subcommand's arguments; for `show`, the query to open with.
+    pub args: Vec<String>,
 }
 
 impl cosmic::app::CosmicFlags for Flags {
     type SubCommand = String;
     type Args = Vec<String>;
+
+    fn action(&self) -> Option<&String> {
+        self.action.as_ref()
+    }
+
+    fn args(&self) -> Vec<&str> {
+        self.args.iter().map(String::as_str).collect()
+    }
 }
+
+/// The `jump show <query>` subcommand: open with the query pre-filled.
+///
+/// This is what makes per-command hotkeys possible without owning any global
+/// keybinding state — COSMIC's own custom shortcuts can bind `jump show clip`
+/// and land straight in clipboard history.
+pub const ACTION_SHOW: &str = "show";
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -78,6 +98,8 @@ pub enum Message {
     ContentResults { query: String, items: Vec<Item> },
     /// The compositor's window list changed.
     Windows(Vec<Window>),
+    /// The current MPRIS track, fetched when the overlay opens.
+    NowPlaying(Option<String>),
     /// The window-switcher backend came up.
     ToplevelsReady(Toplevels),
     /// Clipboard history changed.
@@ -166,6 +188,11 @@ pub struct App {
     content: Option<Arc<Mutex<Content>>>,
     /// Clipboard history, newest first.
     clips: Vec<Entry>,
+    /// What the most relevant player is playing, fetched when the overlay
+    /// opens. A snapshot, not a subscription: it captions the media commands
+    /// for the seconds the overlay is up, and re-fetching per open is cheaper
+    /// than tracking every player's property changes all session.
+    now_playing: Option<String>,
     /// `None` when the compositor does not implement wlr-data-control.
     clipboard: Option<Clipboard>,
     selected: usize,
@@ -282,6 +309,65 @@ impl App {
             .collect()
     }
 
+    /// Quicklink rows for a query one of the configured keywords claims.
+    ///
+    /// Several links may share a keyword; all of them answer, and the user
+    /// picks. The URL is expanded here so activation is a plain open.
+    fn matching_quicklinks(&self, query: &str) -> Vec<Item> {
+        self.config
+            .quicklinks
+            .iter()
+            .filter_map(|link| {
+                let rest = link.match_query(query)?;
+                let url = link.url_for(rest);
+                Some(Item {
+                    key: jump_core::ItemKey(format!("quicklink:{}", link.name)),
+                    id: 0,
+                    title: if rest.is_empty() {
+                        link.name.clone()
+                    } else {
+                        fl!("web-search-for", name = link.name.as_str(), query = rest)
+                    },
+                    // Where Enter goes, so a typo in the template is visible
+                    // before it is opened.
+                    subtitle: url.clone(),
+                    icon: Some(jump_core::Icon::Name("web-browser-symbolic".to_owned())),
+                    category_icon: Some(jump_core::Icon::Name("web-browser-symbolic".to_owned())),
+                    window: None,
+                    source: Source::Url { url },
+                    autocomplete: None,
+                    score: 1.0,
+                })
+            })
+            .collect()
+    }
+
+    /// Fallback web searches, appended below an ordinary search's results.
+    ///
+    /// Appended rather than merged: they are not an answer to the query, they
+    /// are where to go when the answers were not it, so they belong at the
+    /// bottom in configuration order regardless of scores.
+    fn fallback_items(&self, query: &str) -> Vec<Item> {
+        self.config
+            .fallbacks
+            .iter()
+            .map(|link| Item {
+                key: jump_core::ItemKey(format!("fallback:{}", link.name)),
+                id: 0,
+                title: fl!("web-search-for", name = link.name.as_str(), query = query),
+                subtitle: fl!("web-search-subtitle"),
+                icon: Some(jump_core::Icon::Name("web-browser-symbolic".to_owned())),
+                category_icon: Some(jump_core::Icon::Name("web-browser-symbolic".to_owned())),
+                window: None,
+                source: Source::Url {
+                    url: link.url_for(query),
+                },
+                autocomplete: None,
+                score: 0.0,
+            })
+            .collect()
+    }
+
     /// Windows whose title or application id matches `query`.
     ///
     /// Matching is a simple case-insensitive substring test rather than the
@@ -335,6 +421,20 @@ impl App {
             return;
         }
 
+        // `emoji …` likewise: a page of emoji next to application results
+        // would be noise in both directions.
+        if let Some(needle) = keyword_rest(&self.input, EMOJI_KEYWORD) {
+            self.install(emoji_items(needle));
+            return;
+        }
+
+        // A quicklink keyword claims the query the way a plugin keyword does.
+        let quicklinks = self.matching_quicklinks(&self.input);
+        if !quicklinks.is_empty() {
+            self.install(quicklinks);
+            return;
+        }
+
         let clips = self.matching_clips(&self.input);
         // The keyword takes the query over entirely, the same way a plugin
         // keyword does.
@@ -344,13 +444,22 @@ impl App {
         }
 
         let mut merged = self.matching_windows(&self.input);
-        merged.append(&mut system::matching(&self.input));
+        merged.append(&mut system::matching(
+            &self.input,
+            self.now_playing.as_deref(),
+        ));
         merged.append(&mut items);
 
         // One scale for every provider. See `jump_core::rank` — concatenating
         // provider lists and sorting by position is what buried file results
         // below eight mediocre application matches.
-        let items = jump_core::rank::merge(merged, &self.input, &self.frecency);
+        let mut items = jump_core::rank::merge(merged, &self.input, &self.frecency);
+
+        // Fallback searches close the list on every real query, so even a
+        // query that matched nothing ends somewhere useful.
+        if !self.input.is_empty() && !self.plugins.is_claimed(&self.input) {
+            items.extend(self.fallback_items(&self.input));
+        }
         self.install(items);
     }
 
@@ -394,6 +503,25 @@ impl App {
                 launcher.interrupt();
             }
             self.install(items);
+            return self.refresh_blur();
+        }
+
+        // Emoji and quicklinks are answered locally the same way: no fanout,
+        // and the service is interrupted rather than racing to fill the list.
+        if let Some(needle) = keyword_rest(&query, EMOJI_KEYWORD) {
+            if let Some(launcher) = self.launcher.as_ref() {
+                launcher.interrupt();
+            }
+            self.install(emoji_items(needle));
+            return self.refresh_blur();
+        }
+
+        let quicklinks = self.matching_quicklinks(&query);
+        if !quicklinks.is_empty() {
+            if let Some(launcher) = self.launcher.as_ref() {
+                launcher.interrupt();
+            }
+            self.install(quicklinks);
             return self.refresh_blur();
         }
 
@@ -584,7 +712,22 @@ impl App {
             // per-interaction state so the first real keystroke is a clean
             // search rather than a continuation of the previous session.
             self.search(String::new()),
+            // Snapshot the current track off the frame, so the media
+            // commands can caption themselves with what is playing.
+            Task::perform(system::now_playing(), |track| {
+                cosmic::action::app(Message::NowPlaying(track))
+            }),
         ])
+    }
+
+    /// Show the overlay with `query` already in the field — the
+    /// `jump show <query>` deep link.
+    fn open_with_query(&mut self, query: String) -> Task<Message> {
+        let open = self.open();
+        self.input = query.clone();
+        self.selected = 0;
+        let search = self.search(query);
+        Task::batch([open, search])
     }
 
     /// Begin hiding the overlay. The surface is destroyed later, in
@@ -720,6 +863,9 @@ impl App {
             }
             Source::Process { pid } => {
                 jump_core::process::terminate(*pid, false);
+            }
+            Source::Url { url } => {
+                jump_core::web::open(url);
             }
             Source::System { id } => match system::run(id) {
                 Some(system::Outcome::Launch(launch)) => {
@@ -864,6 +1010,7 @@ impl cosmic::Application for App {
             files: None,
             content: None,
             clips: Vec::new(),
+            now_playing: None,
             clipboard: None,
             selected: 0,
             actions: None,
@@ -884,8 +1031,17 @@ impl cosmic::Application for App {
 
         // Normally the process is started *by* the keybinding, so the user is
         // already waiting and the overlay should map immediately. Under
-        // `--daemon` it starts hidden and waits to be toggled.
-        let open = if flags.daemon {
+        // `--daemon` it starts hidden and waits to be toggled. `show` on the
+        // *first* invocation lands here too — when there is no daemon yet to
+        // forward it to, this process is the one that honours it.
+        let open = if let Some(query) = flags
+            .action
+            .as_deref()
+            .filter(|action| *action == ACTION_SHOW)
+            .map(|_| flags.args.join(" "))
+        {
+            app.open_with_query(query)
+        } else if flags.daemon {
             tracing::info!("started in daemon mode; waiting to be activated");
             Task::none()
         } else {
@@ -1116,6 +1272,18 @@ impl cosmic::Application for App {
 
             Message::ToplevelsReady(toplevels) => {
                 self.toplevels = Some(toplevels);
+                Task::none()
+            }
+
+            Message::NowPlaying(track) => {
+                let changed = track != self.now_playing;
+                self.now_playing = track;
+                // Media command subtitles are baked into the built results, so
+                // a visible search has to be re-run for the caption to appear.
+                if changed && !self.input.is_empty() {
+                    let query = self.input.clone();
+                    return self.search(query);
+                }
                 Task::none()
             }
 
@@ -1484,10 +1652,20 @@ impl cosmic::Application for App {
         self.dismiss()
     }
 
-    fn dbus_activation(&mut self, _msg: cosmic::dbus_activation::Message) -> Task<Self::Message> {
-        // Re-running `jump` while the daemon is up is the toggle gesture, so
-        // this is what a keybinding ends up calling.
-        self.update(Message::Toggle)
+    fn dbus_activation(&mut self, msg: cosmic::dbus_activation::Message) -> Task<Self::Message> {
+        match msg.msg {
+            // `jump show <query>` from a second invocation: open with the
+            // query pre-filled, and re-fill it when the overlay was already
+            // up — the user asked for that view, not for a toggle.
+            cosmic::dbus_activation::Details::ActivateAction { action, args }
+                if action == ACTION_SHOW =>
+            {
+                self.open_with_query(args.join(" "))
+            }
+            // Re-running `jump` while the daemon is up is the toggle gesture,
+            // so this is what a keybinding ends up calling.
+            _ => self.update(Message::Toggle),
+        }
     }
 }
 
@@ -1508,8 +1686,6 @@ fn tray_stream() -> impl cosmic::iced::futures::Stream<Item = Message> {
     })
 }
 
-/// Type tag identifying the settings subscription.
-
 /// Documents indexed between yields, so queries are not blocked behind the
 /// background indexer.
 const CONTENT_CHUNK: usize = 200;
@@ -1526,6 +1702,40 @@ const CLIP_KEYWORD: &str = "clip";
 /// Keyword for process search. Not localised: it is a command vocabulary the
 /// same way `clip` is, and muscle memory should survive a locale change.
 const KILL_KEYWORD: &str = "kill";
+
+/// Keyword for emoji search, claiming the query the same way `clip` does.
+const EMOJI_KEYWORD: &str = "emoji";
+
+/// Most emoji shown for one query. Twelve list rows is the panel's budget; a
+/// denser grid presentation is the planned home for the rest.
+const EMOJI_LIMIT: usize = 12;
+
+/// Emoji rows for an `emoji …` query. The glyph rides in the title — emoji
+/// have no icon-theme icons, and the text renderer already draws them.
+fn emoji_items(needle: &str) -> Vec<Item> {
+    jump_core::emoji::matching(needle, EMOJI_LIMIT)
+        .into_iter()
+        .map(|matched| Item {
+            key: jump_core::ItemKey(format!("emoji:{}", matched.emoji)),
+            id: 0,
+            title: format!("{}  {}", matched.emoji, matched.name),
+            subtitle: matched.shortcode.map_or_else(
+                || fl!("emoji-copy-subtitle"),
+                |code| format!(":{code}: — {}", fl!("emoji-copy-subtitle")),
+            ),
+            icon: None,
+            category_icon: None,
+            window: None,
+            // Copying is exactly what activating a clipboard entry does, so
+            // emoji reuse that source rather than growing a parallel one.
+            source: Source::Clipboard {
+                text: matched.emoji.to_owned(),
+            },
+            autocomplete: None,
+            score: 1.0,
+        })
+        .collect()
+}
 
 /// The query text after `keyword`, when the query is addressed to it.
 ///

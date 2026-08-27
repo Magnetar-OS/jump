@@ -30,6 +30,7 @@
 //! ```
 
 pub mod content;
+pub mod emoji;
 pub mod files;
 pub mod frecency;
 pub mod launcher;
@@ -37,6 +38,7 @@ pub mod model;
 pub mod plugin;
 pub mod process;
 pub mod rank;
+pub mod web;
 
 pub use content::Content;
 pub use files::Files;

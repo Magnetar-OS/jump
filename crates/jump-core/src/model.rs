@@ -73,6 +73,12 @@ pub enum Source {
         /// Process id, valid only for the listing that produced it.
         pid: u32,
     },
+    /// A web link — a quicklink or a fallback search; activating it opens the
+    /// URL with the user's default handler.
+    Url {
+        /// Fully-expanded URL, query already encoded in.
+        url: String,
+    },
 }
 
 /// An icon to render, resolved by the frontend against the active icon theme.
