@@ -677,7 +677,11 @@ impl App {
         }
 
         let Some(item) = self.results.get(index) else {
-            tracing::debug!(index, results = self.results.len(), "activate on empty results");
+            tracing::debug!(
+                index,
+                results = self.results.len(),
+                "activate on empty results"
+            );
             return Task::none();
         };
         tracing::debug!(index, key = %item.key, "activating");
@@ -1396,12 +1400,14 @@ impl cosmic::Application for App {
             // emits when a value actually changed; with the `dbus-config`
             // feature it goes through cosmic-settings-daemon rather than
             // polling inotify.
-            self.core().watch_config::<Config>(jump::APP_ID).map(|update| {
-                for error in update.errors {
-                    tracing::warn!(%error, "ignoring an unreadable setting");
-                }
-                Message::ConfigChanged(update.config)
-            }),
+            self.core()
+                .watch_config::<Config>(jump::APP_ID)
+                .map(|update| {
+                    for error in update.errors {
+                        tracing::warn!(%error, "ignoring an unreadable setting");
+                    }
+                    Message::ConfigChanged(update.config)
+                }),
             // Keyboard handling lives here rather than on the text input so
             // that navigation keys work regardless of which widget has focus.
             event::listen_with(|event, _status, _id| match event {

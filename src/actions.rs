@@ -65,8 +65,7 @@ impl Panel {
     #[must_use]
     pub fn for_item(item: &Item) -> Option<Self> {
         let actions = actions_for(item);
-        let worthwhile =
-            actions.len() > 1 || matches!(item.source, Source::Launcher);
+        let worthwhile = actions.len() > 1 || matches!(item.source, Source::Launcher);
         worthwhile.then_some(Self {
             actions,
             selected: 0,
@@ -179,9 +178,8 @@ fn trash_available() -> bool {
 }
 
 fn which(program: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|paths| {
-        std::env::split_paths(&paths).any(|dir| dir.join(program).is_file())
-    })
+    std::env::var_os("PATH")
+        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
 }
 
 /// Move `path` to the trash, detached from the frame.
@@ -238,9 +236,12 @@ mod tests {
                 .iter()
                 .any(|action| action.kind == Kind::OpenFolder(PathBuf::from("/home/user/notes")))
         );
-        assert!(panel.actions.iter().any(
-            |action| action.kind == Kind::CopyText("/home/user/notes/todo.md".to_owned())
-        ));
+        assert!(
+            panel
+                .actions
+                .iter()
+                .any(|action| action.kind == Kind::CopyText("/home/user/notes/todo.md".to_owned()))
+        );
     }
 
     #[test]
@@ -289,8 +290,8 @@ mod tests {
 
     #[test]
     fn processes_offer_force_kill() {
-        let panel = Panel::for_item(&item(Source::Process { pid: 1234 }))
-            .expect("processes have a panel");
+        let panel =
+            Panel::for_item(&item(Source::Process { pid: 1234 })).expect("processes have a panel");
         assert!(matches!(panel.actions[0].kind, Kind::Primary));
         assert!(
             panel

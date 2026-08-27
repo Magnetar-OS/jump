@@ -413,7 +413,6 @@ impl State {
         self.entries.truncate(HISTORY_LIMIT);
         self.dirty = true;
     }
-
 }
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {

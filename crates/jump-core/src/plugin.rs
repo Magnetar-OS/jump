@@ -100,10 +100,9 @@ impl Manifest {
     /// The deadline this plugin's query command runs under.
     #[must_use]
     pub fn timeout(&self) -> Duration {
-        self.timeout_ms
-            .map_or(QUERY_TIMEOUT, |ms| {
-                Duration::from_millis(ms).clamp(Duration::from_millis(50), MAX_QUERY_TIMEOUT)
-            })
+        self.timeout_ms.map_or(QUERY_TIMEOUT, |ms| {
+            Duration::from_millis(ms).clamp(Duration::from_millis(50), MAX_QUERY_TIMEOUT)
+        })
     }
 }
 

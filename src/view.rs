@@ -755,11 +755,7 @@ fn result_row<'a>(
 fn alpha_text(alpha: f32, primary: bool) -> Color {
     // From the theme, not a literal: the panel is filled with the theme's
     // background colour, so hardcoded white text disappears on a light theme.
-    let on: Color = cosmic::theme::active()
-        .cosmic()
-        .background(false)
-        .on
-        .into();
+    let on: Color = cosmic::theme::active().cosmic().background(false).on.into();
     let base = if primary { 1.0 } else { 0.65 };
     Color {
         a: base * alpha.clamp(0.0, 1.0),

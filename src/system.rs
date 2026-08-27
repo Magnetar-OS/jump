@@ -297,10 +297,7 @@ fn match_score(command: &Command, tokens: &[String]) -> f32 {
 /// Commands matching `query`, as pre-scored [`Item`]s ready to merge.
 #[must_use]
 pub fn matching(query: &str) -> Vec<Item> {
-    let tokens: Vec<String> = query
-        .split_whitespace()
-        .map(str::to_lowercase)
-        .collect();
+    let tokens: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
 
     commands()
         .into_iter()

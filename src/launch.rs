@@ -87,7 +87,8 @@ impl Launch {
 
         env.extend(gpu_env(self.gpu).await);
 
-        cosmic::desktop::spawn_desktop_exec(self.exec, env, Some(&self.app_id), self.terminal).await;
+        cosmic::desktop::spawn_desktop_exec(self.exec, env, Some(&self.app_id), self.terminal)
+            .await;
     }
 }
 
