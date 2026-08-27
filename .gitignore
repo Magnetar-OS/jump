@@ -1,2 +1,5 @@
 /target
 .release-kit/
+/vendor
+/vendor.tar
+/.cargo
