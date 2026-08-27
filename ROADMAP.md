@@ -37,10 +37,10 @@ fit — jump's plugin format is already Alfred's script-filter contract).
 | File search | ✅ | ✅ | Private plocate index, two-phase ranking |
 | Full-text file search | 🔶 | ✅ | FTS5, opt-in, ahead of Raycast here |
 | Clipboard history | ✅ | 🔶 | Text only today. ⬜ images (grid view), ⬜ paste-into-frontmost (needs virtual-keyboard or data-control paste path) |
-| Snippets / text expansion | ✅ | ⬜ | Depends on `zwp_virtual_keyboard_v1` on cosmic-comp — investigate before promising |
+| Snippets / text expansion | ✅ | ⬜ | Buildable: cosmic-comp advertises `zwp_virtual_keyboard_manager_v1` (measured on a live 1.5 session). Injection needs a custom keymap, wtype-style — real work, but no protocol blocker |
 | Quicklinks (URL templates) | ✅ | ✅ | `quicklinks` setting: keyworded URL templates, claiming the query; simpler than bundling plugins and live-reloads with the config store |
 | Window switching | ✅ | ✅ | `ext-foreign-toplevel-list`, merged into search, Ctrl+W closes |
-| Window management commands | ✅ | ⬜ | maximize / minimize / move-to-workspace via `cosmic-toplevel-management`; tiling toggle via cosmic-comp config — investigate protocol coverage first |
+| Window management commands | ✅ | ⬜ | Protocol confirmed: `zcosmic_toplevel_manager_v1` v4 and `ext_workspace_manager_v1` are advertised (measured); maximize / minimize / move-to-workspace are implementable |
 | System commands | ✅ | ✅ | Dark/light toggle, Settings deep links; session commands via pop-launcher |
 | Media control | ✅ | ✅ | MPRIS play/pause/next/prev, current track in the subtitle |
 | Power profiles | — | ✅ | power-profiles-daemon |
@@ -122,9 +122,10 @@ flow through the bridge).
       the frame when the overlay opens, re-running a visible search when the
       answer arrives — the match path itself stays synchronous.
 - [ ] Window management commands over `cosmic-toplevel-management`:
-      maximize, minimize, move to workspace — investigate which requests
-      cosmic-comp actually honours from a third-party client before listing
-      individual commands.
+      maximize, minimize, move to workspace. The protocols are there —
+      `zcosmic_toplevel_manager_v1` v4 and `ext_workspace_manager_v1`,
+      measured on a live 1.5 session — what remains is verifying which
+      requests cosmic-comp honours from a third-party client.
 - [ ] Bluetooth device connect/disconnect via bluez
 - [ ] Wi-Fi network switching via NetworkManager
 - [x] Process search + kill: `kill …` lists the user's own processes by
@@ -140,8 +141,12 @@ flow through the bridge).
 - [x] Fallback searches: configurable "Search the web for …" rows appended
       below every ordinary search's results (`fallbacks`, DuckDuckGo and
       Wikipedia by default)
-- [ ] Snippet expansion — needs a virtual keyboard protocol; investigate
-      `zwp_virtual_keyboard_v1` on cosmic-comp before promising it
+- [ ] Snippet expansion — **investigation resolved**: cosmic-comp advertises
+      `zwp_virtual_keyboard_manager_v1` v1 and `zwp_input_method_manager_v2`
+      v1 (measured on a live 1.5 session with a registry probe), so injection
+      is possible. The remaining work is real but unblocked: a generated
+      keymap carrying the snippet's symbols, wtype-style. The same mechanism
+      unlocks paste-into-frontmost for clipboard entries (pillar 3).
 
 ## Pillar 3 — UI: pixel-perfect and delightful
 
