@@ -50,7 +50,7 @@ fit — jump's plugin format is already Alfred's script-filter contract).
 | Action panel (⌘K) | ✅ | ✅ | Ctrl+K, keyboard-first. ⬜ v2: plugin `mods`, per-action shortcuts shown |
 | Extensions / plugin API | ✅ | ✅ | Script-filter contract + pop-launcher plugins. ⬜ devex tooling below |
 | Extension store | ✅ | 🚫→🔶 | No store service. System-wide plugin dir (`/usr/share/jump/plugins`) ✅; curated plugin list in the repo ⬜ |
-| Per-command aliases & hotkeys | ✅ | 🔶 | CLI deep links ✅ (`jump show clip` bound to a COSMIC custom shortcut); keyword editor (aliases) ⬜ |
+| Per-command aliases & hotkeys | ✅ | ✅ | CLI deep links (`jump show clip` bound to a COSMIC custom shortcut) + `plugin_keywords` overrides; settings-window editor pending |
 | Favorites / pinned results | ✅ | ✅ | Pin on Top in the action panel; pinned matches rank above everything |
 | Fallback searches | ✅ | ✅ | `fallbacks` setting; rows appended below every search's results |
 | Menu-bar search of frontmost app | ✅ | 🚫 | No Wayland protocol exposes another client's menus; not buildable honestly |
@@ -195,8 +195,9 @@ second dimension of interaction on each row.
 - [ ] Search-provider section: toggle and re-order providers (windows, files,
       content, clipboard, system, each pop-launcher plugin)
 - [ ] Per-provider result caps and the rank weights exposed as "advanced"
-- [ ] Keyword editor: override any plugin's keyword without editing its
-      manifest — this is also the aliases feature
+- [x] Keyword overrides: `plugin_keywords` maps a plugin id to a replacement
+      keyword without editing its manifest — the aliases feature. An empty
+      keyword removes it. ⬜ the settings-window editor on top of it.
 - [x] Favorites: Pin on Top in every result's action panel; a pinned result
       that matches the query at all ranks above everything unpinned
       (`favorites` config key). ⬜ manage the list in the settings window.

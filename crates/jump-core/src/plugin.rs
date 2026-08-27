@@ -222,10 +222,11 @@ impl Plugin {
     /// Whether this plugin should run for `query`, and the text it should see.
     ///
     /// A keyworded plugin receives the query with its keyword stripped, matching
-    /// Alfred: typing `gh jump` hands the plugin `jump`.
+    /// Alfred: typing `gh jump` hands the plugin `jump`. The host passes the
+    /// *effective* keyword, so a user override replaces the manifest's here.
     #[must_use]
-    pub fn match_query<'a>(&self, query: &'a str) -> Option<&'a str> {
-        match self.manifest.keyword.as_deref() {
+    pub fn match_query_as<'a>(&self, keyword: Option<&str>, query: &'a str) -> Option<&'a str> {
+        match keyword {
             None => Some(query),
             Some(keyword) => {
                 let rest = query.strip_prefix(keyword)?;
@@ -238,6 +239,12 @@ impl Plugin {
                 }
             }
         }
+    }
+
+    /// [`Self::match_query_as`] with the manifest's own keyword.
+    #[must_use]
+    pub fn match_query<'a>(&self, query: &'a str) -> Option<&'a str> {
+        self.match_query_as(self.manifest.keyword.as_deref(), query)
     }
 
     /// Run the plugin's query command and parse its results, plus the rerun
@@ -392,6 +399,10 @@ pub struct PluginHost {
     /// Plugin ids the user has switched off. They stay discovered — the
     /// settings window needs to list them — but never run.
     disabled: std::collections::HashSet<String>,
+    /// Per-plugin keyword overrides: the alias mechanism. An entry replaces
+    /// the manifest's keyword without editing the plugin; an empty string
+    /// removes the keyword, making the plugin run on every query.
+    keyword_overrides: std::collections::HashMap<String, String>,
 }
 
 impl PluginHost {
@@ -496,6 +507,7 @@ impl PluginHost {
         Self {
             plugins,
             disabled: std::collections::HashSet::new(),
+            keyword_overrides: std::collections::HashMap::new(),
         }
     }
 
@@ -506,6 +518,30 @@ impl PluginHost {
         S: Into<String>,
     {
         self.disabled = ids.into_iter().map(Into::into).collect();
+    }
+
+    /// Replace the keyword overrides, e.g. when settings change.
+    pub fn set_keyword_overrides<I, K, V>(&mut self, overrides: I)
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        self.keyword_overrides = overrides
+            .into_iter()
+            .map(|(id, keyword)| (id.into(), keyword.into()))
+            .collect();
+    }
+
+    /// The keyword `plugin` currently answers to: the user's override when
+    /// one exists (empty meaning "no keyword"), else the manifest's.
+    #[must_use]
+    pub fn effective_keyword<'a>(&'a self, plugin: &'a Plugin) -> Option<&'a str> {
+        match self.keyword_overrides.get(&plugin.id) {
+            Some(keyword) if keyword.is_empty() => None,
+            Some(keyword) => Some(keyword.as_str()),
+            None => plugin.manifest.keyword.as_deref(),
+        }
     }
 
     /// Every discovered plugin, the switched-off ones included, with whether
@@ -540,7 +576,11 @@ impl PluginHost {
             .plugins
             .iter()
             .filter(|plugin| !self.disabled.contains(&plugin.id))
-            .filter_map(|plugin| plugin.match_query(text).map(|query| (plugin, query)))
+            .filter_map(|plugin| {
+                plugin
+                    .match_query_as(self.effective_keyword(plugin), text)
+                    .map(|query| (plugin, query))
+            })
             .collect();
 
         if matching.is_empty() {
@@ -551,7 +591,7 @@ impl PluginHost {
         // `gh …` they are addressing that plugin, not searching their apps.
         let keyworded: Vec<_> = matching
             .iter()
-            .filter(|(plugin, _)| plugin.manifest.keyword.is_some())
+            .filter(|(plugin, _)| self.effective_keyword(plugin).is_some())
             .collect();
 
         let selected: Vec<_> = if keyworded.is_empty() {
@@ -584,7 +624,10 @@ impl PluginHost {
         self.plugins
             .iter()
             .filter(|plugin| !self.disabled.contains(&plugin.id))
-            .any(|plugin| plugin.manifest.keyword.is_some() && plugin.match_query(text).is_some())
+            .any(|plugin| {
+                let keyword = self.effective_keyword(plugin);
+                keyword.is_some() && plugin.match_query_as(keyword, text).is_some()
+            })
     }
 }
 
@@ -1010,10 +1053,40 @@ mod tests {
     }
 
     #[test]
+    fn keyword_overrides_replace_and_remove_the_manifest_keyword() {
+        let mut host = PluginHost {
+            plugins: vec![plugin(Some("gh"))],
+            disabled: std::collections::HashSet::new(),
+            keyword_overrides: std::collections::HashMap::new(),
+        };
+
+        // Manifest keyword applies untouched.
+        assert!(host.is_claimed("gh jump"));
+
+        // An override is a rename: the old keyword stops answering.
+        host.set_keyword_overrides([("test", "g")]);
+        assert!(host.is_claimed("g jump"));
+        assert!(!host.is_claimed("gh jump"));
+
+        // An empty override removes the keyword entirely: the plugin runs on
+        // every query and claims none.
+        host.set_keyword_overrides([("test", "")]);
+        assert!(!host.is_claimed("g jump"));
+        assert!(!host.is_claimed("gh jump"));
+        let plugin = &host.plugins[0];
+        assert_eq!(host.effective_keyword(plugin), None);
+
+        // Overrides for unknown plugins are inert.
+        host.set_keyword_overrides([("other", "x")]);
+        assert!(host.is_claimed("gh jump"));
+    }
+
+    #[test]
     fn disabled_plugins_neither_run_nor_activate() {
         let mut host = PluginHost {
             plugins: vec![plugin(Some("gh"))],
             disabled: std::collections::HashSet::new(),
+            keyword_overrides: std::collections::HashMap::new(),
         };
 
         assert!(host.is_claimed("gh jump"));

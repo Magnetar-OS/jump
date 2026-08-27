@@ -36,6 +36,7 @@ so a bad value can never stop the launcher from opening.
 | `quicklinks` | list of links | `[]` | Keyworded URL templates, see below |
 | `fallbacks` | list of links | DuckDuckGo, Wikipedia | Web searches appended below every search |
 | `favorites` | list of strings | `[]` | Pinned result keys; written by the action panel's Pin on Top |
+| `plugin_keywords` | list of `(id, keyword)` | `[]` | Alias a plugin's keyword without editing its manifest; `""` removes the keyword |
 | `files` | struct | see below | File search |
 
 ### `quicklinks` and `fallbacks`

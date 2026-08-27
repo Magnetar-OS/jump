@@ -183,6 +183,11 @@ pub struct Config {
     /// ranks above everything unpinned. Written by the action panel's
     /// Pin/Unpin entries.
     pub favorites: Vec<String>,
+    /// Per-plugin keyword overrides, `(plugin id, keyword)` — the alias
+    /// mechanism. Replaces the manifest's keyword without editing the
+    /// plugin; an empty keyword removes it, so the plugin runs on every
+    /// query.
+    pub plugin_keywords: Vec<(String, String)>,
 }
 
 impl Default for Config {
@@ -212,6 +217,7 @@ impl Default for Config {
                 },
             ],
             favorites: Vec::new(),
+            plugin_keywords: Vec::new(),
         }
     }
 }

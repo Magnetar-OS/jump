@@ -1055,6 +1055,7 @@ impl cosmic::Application for App {
             plugins: {
                 let mut plugins = PluginHost::discover();
                 plugins.set_disabled(config.disabled_plugins.iter().cloned());
+                plugins.set_keyword_overrides(config.plugin_keywords.iter().cloned());
                 plugins
             },
             config,
@@ -1277,6 +1278,8 @@ impl cosmic::Application for App {
                 let files_changed = config.files != self.config.files;
                 self.plugins
                     .set_disabled(config.disabled_plugins.iter().cloned());
+                self.plugins
+                    .set_keyword_overrides(config.plugin_keywords.iter().cloned());
                 self.config = config;
                 tracing::info!(files_changed, "settings updated");
                 self.refresh_blur()
