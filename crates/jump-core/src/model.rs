@@ -60,6 +60,9 @@ pub enum Source {
         plugin: String,
         /// Opaque payload handed back to the plugin on activation.
         arg: String,
+        /// Alfred-style `variables`, exported into the activation command's
+        /// environment. Sorted, so two equal items compare equal.
+        variables: Vec<(String, String)>,
     },
     /// A built-in command provided by the frontend — toggling dark mode,
     /// opening a settings page. Carries only an identifier so the engine stays

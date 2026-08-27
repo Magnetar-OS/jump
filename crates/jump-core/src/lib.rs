@@ -45,7 +45,7 @@ pub use files::Files;
 pub use frecency::Frecency;
 pub use launcher::{Error, Event, Launcher, LauncherGuard};
 pub use model::{Icon, Item, ItemKey, Results, Source};
-pub use plugin::{Manifest, Plugin, PluginHost};
+pub use plugin::{Manifest, Plugin, PluginHost, QueryResults};
 
 // Re-exported so frontends can speak the protocol's vocabulary (activation
 // indices, GPU preference for desktop entries) without depending on

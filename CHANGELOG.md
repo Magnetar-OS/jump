@@ -24,3 +24,7 @@ All notable changes to this project are documented here. The format follows
   it to a COSMIC custom shortcut for a per-command hotkey, e.g.
   `jump show clip` straight into clipboard history.
 - The action panel offers "Copy Link" on web results.
+- Plugins can carry Alfred-style `variables` from query to activation
+  (exported as environment variables to the action command) and stream
+  updates with Alfred's `rerun` (re-query on an interval, clamped 0.5–5 s,
+  while the query is on screen).

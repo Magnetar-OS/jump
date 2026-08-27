@@ -226,8 +226,13 @@ existing workflow scripts port by writing a manifest:
 
 `uid` gives an item a stable identity, which is what lets the launcher's
 usage-weighted ranking learn plugin items the way it learns applications.
-`autocomplete` is what Tab replaces the query with. Individual plugins can be
-switched off from the settings window.
+`autocomplete` is what Tab replaces the query with. `variables` — top-level
+or per-item, the item's winning — are exported into the activation command's
+environment, Alfred-style, so state crosses from query to activation without
+being packed into `arg`. A response carrying `rerun` (seconds, clamped
+0.5–5.0) has its query re-run on that interval while it is on screen, which
+is how a polling plugin streams updates. Individual plugins can be switched
+off from the settings window.
 
 A keyworded plugin takes the query over entirely: typing `gh jump` addresses
 that plugin and app results are suppressed. The keyword must be followed by a

@@ -11,7 +11,7 @@
 //! surface, which is the difference between a launcher that appears instantly
 //! and one that appears eventually.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use cosmic::app::{Core, Task};
 use cosmic::iced::keyboard::Key;
@@ -86,8 +86,16 @@ pub enum Message {
     LauncherReady(Launcher),
     /// Something arrived from the pop-launcher service.
     Launcher(jump_core::Event),
-    /// Plugin results for `query`, which may already be stale.
-    PluginResults { query: String, items: Vec<Item> },
+    /// Plugin results for `query`, which may already be stale. `rerun` is how
+    /// soon the plugins that asked to stream want the same query again.
+    PluginResults {
+        query: String,
+        items: Vec<Item>,
+        rerun: Option<Duration>,
+    },
+    /// A plugin's `rerun` timer fired: run `query` against the plugins again
+    /// if the user is still looking at it.
+    RerunPlugins(String),
     /// File-search results for `query`, which may already be stale.
     FileResults { query: String, items: Vec<Item> },
     /// The file index finished (re)building.
@@ -544,15 +552,7 @@ impl App {
         let mut tasks = Vec::new();
 
         if !self.plugins.is_empty() {
-            let plugins = self.plugins.clone();
-            let text = query.clone();
-            tasks.push(Task::perform(
-                async move {
-                    let items = plugins.query(&text).await;
-                    (text, items)
-                },
-                |(query, items)| cosmic::action::app(Message::PluginResults { query, items }),
-            ));
+            tasks.push(query_plugins(self.plugins.clone(), query.clone()));
         }
 
         let query_for_content = query.clone();
@@ -856,9 +856,13 @@ impl App {
                     clipboard.copy(text);
                 }
             }
-            Source::Plugin { plugin, arg } => {
+            Source::Plugin {
+                plugin,
+                arg,
+                variables,
+            } => {
                 if let Some(plugin) = self.plugins.get(plugin) {
-                    plugin.activate(arg);
+                    plugin.activate(arg, variables);
                 }
             }
             Source::Process { pid } => {
@@ -1133,7 +1137,11 @@ impl cosmic::Application for App {
                 }
             },
 
-            Message::PluginResults { query, items } => {
+            Message::PluginResults {
+                query,
+                items,
+                rerun,
+            } => {
                 if query != self.input {
                     return Task::none();
                 }
@@ -1148,7 +1156,29 @@ impl cosmic::Application for App {
                     merged.append(&mut self.results);
                     self.set_results(merged);
                 }
-                self.refresh_blur()
+
+                let refresh = self.refresh_blur();
+                // A plugin that asked to stream gets the same query again
+                // after its interval — each answer schedules at most one
+                // rerun, so the cadence is the plugin's, not a runaway loop.
+                let Some(delay) = rerun else {
+                    return refresh;
+                };
+                Task::batch([
+                    refresh,
+                    Task::future(async move {
+                        tokio::time::sleep(delay).await;
+                        cosmic::action::app(Message::RerunPlugins(query))
+                    }),
+                ])
+            }
+
+            Message::RerunPlugins(query) => {
+                // Only while the user is still looking at exactly that query.
+                if query != self.input || self.surface.is_none() || self.dismissing {
+                    return Task::none();
+                }
+                query_plugins(self.plugins.clone(), query)
             }
 
             Message::IndexReady(files) => {
@@ -1735,6 +1765,24 @@ fn emoji_items(needle: &str) -> Vec<Item> {
             score: 1.0,
         })
         .collect()
+}
+
+/// Query the plugin host off the frame, tagging the answer with the query
+/// that produced it and any requested rerun interval.
+fn query_plugins(plugins: PluginHost, query: String) -> Task<Message> {
+    Task::perform(
+        async move {
+            let results = plugins.query(&query).await;
+            (query, results)
+        },
+        |(query, results)| {
+            cosmic::action::app(Message::PluginResults {
+                query,
+                items: results.items,
+                rerun: results.rerun,
+            })
+        },
+    )
 }
 
 /// The query text after `keyword`, when the query is addressed to it.

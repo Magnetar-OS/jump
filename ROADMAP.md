@@ -74,9 +74,12 @@ keep working through the service alongside it.
       Plugins section in the settings window, applied live via `watch_config`.
 - [ ] `mods` — alternate actions on modifier+Enter (surfaces in the action
       panel, pillar 3).
-- [ ] Plugin-supplied variables/state between query and activation
-      (Alfred's `variables`).
-- [ ] Streaming results (rerun-on-interval, Alfred's `rerun`).
+- [x] Plugin-supplied variables/state between query and activation
+      (Alfred's `variables`): top-level and per-item, the item's winning,
+      exported into the activation command's environment.
+- [x] Streaming results (Alfred's `rerun`): a response naming `rerun` seconds
+      (clamped 0.5–5.0) has its query re-run on that interval while the user
+      is still looking at it; each answer schedules at most one rerun.
 - [ ] A `jump plugin new <name>` scaffolder and a `jump plugin lint` that
       checks a manifest + sample output against the schema.
 - [x] Discovery of system-wide plugins: every `<data dir>/jump/plugins` on

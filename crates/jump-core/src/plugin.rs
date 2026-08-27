@@ -130,6 +130,11 @@ struct PluginItem {
     /// Text that replaces the query on Tab, Alfred's `autocomplete`.
     #[serde(default)]
     autocomplete: Option<String>,
+    /// State carried from query to activation, Alfred's `variables`: exported
+    /// as environment variables to the activation command. Merged over the
+    /// response's top-level `variables`, the item's own winning.
+    #[serde(default)]
+    variables: std::collections::HashMap<String, String>,
 }
 
 const fn default_valid() -> bool {
@@ -157,6 +162,40 @@ impl PluginIcon {
 #[derive(Debug, Clone, Deserialize)]
 struct PluginResponse {
     items: Vec<PluginItem>,
+    /// Variables applied to every item, Alfred's top-level `variables`.
+    #[serde(default)]
+    variables: std::collections::HashMap<String, String>,
+    /// Seconds after which the same query should run again, Alfred's `rerun`
+    /// — how a progress-reporting or polling plugin streams updates.
+    #[serde(default)]
+    rerun: Option<f64>,
+}
+
+/// Bounds on a plugin's `rerun` interval. Alfred allows 0.1–5.0 s; the floor
+/// here is higher because every rerun forks a process, and a launcher that
+/// respawns scripts ten times a second shows up in power measurements.
+const RERUN_RANGE: std::ops::RangeInclusive<f64> = 0.5..=5.0;
+
+/// A completed plugin query: the items, plus how long until the plugins that
+/// asked to be re-run should see the same query again.
+#[derive(Debug, Clone, Default)]
+pub struct QueryResults {
+    pub items: Vec<Item>,
+    /// Soonest requested rerun across the plugins that answered.
+    pub rerun: Option<Duration>,
+}
+
+/// The item's variables over the response's, sorted for a stable identity —
+/// the result lives inside [`Source::Plugin`], which is compared by `Eq`.
+fn merge_variables(
+    response: &std::collections::HashMap<String, String>,
+    item: std::collections::HashMap<String, String>,
+) -> Vec<(String, String)> {
+    let mut merged = response.clone();
+    merged.extend(item);
+    let mut variables: Vec<(String, String)> = merged.into_iter().collect();
+    variables.sort();
+    variables
 }
 
 /// A discovered plugin: its manifest plus the directory it lives in.
@@ -201,8 +240,9 @@ impl Plugin {
         }
     }
 
-    /// Run the plugin's query command and parse its results.
-    async fn query(&self, text: &str) -> Vec<Item> {
+    /// Run the plugin's query command and parse its results, plus the rerun
+    /// interval it asked for, if any.
+    async fn query(&self, text: &str) -> (Vec<Item>, Option<Duration>) {
         let program = self.resolve(&self.manifest.query);
 
         let child = Command::new(&program)
@@ -219,7 +259,7 @@ impl Plugin {
             Ok(Ok(output)) => output,
             Ok(Err(error)) => {
                 tracing::warn!(plugin = %self.id, ?program, %error, "plugin failed to run");
-                return Vec::new();
+                return (Vec::new(), None);
             }
             Err(_) => {
                 tracing::warn!(
@@ -227,37 +267,47 @@ impl Plugin {
                     timeout_ms = deadline.as_millis(),
                     "plugin exceeded its deadline; dropping results"
                 );
-                return Vec::new();
+                return (Vec::new(), None);
             }
         };
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             tracing::warn!(plugin = %self.id, status = ?output.status, %stderr, "plugin exited non-zero");
-            return Vec::new();
+            return (Vec::new(), None);
         }
 
         if output.stdout.len() > MAX_OUTPUT_BYTES {
             tracing::warn!(plugin = %self.id, bytes = output.stdout.len(), "plugin output too large");
-            return Vec::new();
+            return (Vec::new(), None);
         }
 
         let response: PluginResponse = match serde_json::from_slice(&output.stdout) {
             Ok(response) => response,
             Err(error) => {
                 tracing::warn!(plugin = %self.id, %error, "plugin emitted invalid JSON");
-                return Vec::new();
+                return (Vec::new(), None);
             }
         };
 
         let fallback_icon = self.manifest.icon.as_ref().map(|n| Icon::Name(n.clone()));
+        let PluginResponse {
+            items,
+            variables: response_variables,
+            rerun,
+        } = response;
 
-        response
-            .items
+        // NaN and absurd values from a script must not become a timer.
+        let rerun = rerun.filter(|seconds| seconds.is_finite()).map(|seconds| {
+            Duration::from_secs_f64(seconds.clamp(*RERUN_RANGE.start(), *RERUN_RANGE.end()))
+        });
+
+        let items = items
             .into_iter()
             .filter(|item| item.valid)
             .map(|item| {
                 let arg = item.arg.unwrap_or_else(|| item.title.clone());
+                let variables = merge_variables(&response_variables, item.variables);
                 // Prefer the uid: an item whose arg changes with the query — a
                 // search URL, say — would otherwise get a new identity every
                 // keystroke, and frecency could never learn it.
@@ -283,19 +333,26 @@ impl Plugin {
                     source: Source::Plugin {
                         plugin: self.id.clone(),
                         arg,
+                        variables,
                     },
                     autocomplete: item.autocomplete,
                     score: 0.0,
                 }
             })
-            .collect()
+            .collect();
+
+        (items, rerun)
     }
 
     /// Run the plugin's activation command for `arg`.
     ///
+    /// `variables` — the item's merged `variables`, Alfred-style — are
+    /// exported into the command's environment, which is how a plugin carries
+    /// state from query to activation without encoding it all into `arg`.
+    ///
     /// Spawned detached: the launcher dismisses immediately and does not wait
     /// for the action to finish.
-    pub fn activate(&self, arg: &str) {
+    pub fn activate(&self, arg: &str, variables: &[(String, String)]) {
         let (program, extra) = match self.manifest.activate.as_deref() {
             Some(activate) => (self.resolve(activate), Vec::new()),
             None => (
@@ -305,6 +362,7 @@ impl Plugin {
         };
 
         let result = Command::new(&program)
+            .envs(variables.iter().map(|(key, value)| (key, value)))
             .args(extra)
             .arg(arg)
             .current_dir(&self.directory)
@@ -477,7 +535,7 @@ impl PluginHost {
     ///
     /// Plugins run in parallel and share the same deadline, so total latency is
     /// the slowest matching plugin rather than the sum.
-    pub async fn query(&self, text: &str) -> Vec<Item> {
+    pub async fn query(&self, text: &str) -> QueryResults {
         let matching: Vec<_> = self
             .plugins
             .iter()
@@ -486,7 +544,7 @@ impl PluginHost {
             .collect();
 
         if matching.is_empty() {
-            return Vec::new();
+            return QueryResults::default();
         }
 
         // A keyworded plugin takes over the query entirely: once the user types
@@ -506,11 +564,17 @@ impl PluginHost {
             .into_iter()
             .map(|(plugin, query)| plugin.query(query));
 
-        futures::future::join_all(futures)
-            .await
-            .into_iter()
-            .flatten()
-            .collect()
+        let mut results = QueryResults::default();
+        for (items, rerun) in futures::future::join_all(futures).await {
+            results.items.extend(items);
+            // The soonest rerun wins: a plugin that asked to stream must not
+            // be held to a slower neighbour's interval.
+            results.rerun = match (results.rerun, rerun) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
+        }
+        results
     }
 
     /// Whether a keyworded plugin claims this query, meaning pop-launcher
@@ -596,6 +660,47 @@ mod tests {
         assert_eq!(response.items[0].uid.as_deref(), Some("repo"));
         assert_eq!(response.items[0].autocomplete.as_deref(), Some("gh jump "));
         assert_eq!(response.items[1].uid, None);
+    }
+
+    #[test]
+    fn rerun_parses_and_is_clamped_sanely() {
+        let parse = |json: &str| -> Option<f64> {
+            serde_json::from_str::<PluginResponse>(json)
+                .expect("json parses")
+                .rerun
+        };
+        assert_eq!(parse(r#"{"items":[]}"#), None);
+        assert_eq!(parse(r#"{"items":[],"rerun":1.5}"#), Some(1.5));
+
+        // The clamp applied where the value becomes a timer.
+        let clamp = |seconds: f64| seconds.clamp(*RERUN_RANGE.start(), *RERUN_RANGE.end());
+        assert_eq!(clamp(0.1), 0.5);
+        assert_eq!(clamp(60.0), 5.0);
+        assert_eq!(clamp(2.0), 2.0);
+    }
+
+    #[test]
+    fn item_variables_win_over_response_variables() {
+        let response: PluginResponse = serde_json::from_str(
+            r#"{"variables":{"SESSION":"abc","MODE":"list"},
+                "items":[{"title":"one","variables":{"MODE":"open"}},
+                         {"title":"two"}]}"#,
+        )
+        .expect("alfred json parses");
+
+        let merged = merge_variables(&response.variables, response.items[0].variables.clone());
+        assert_eq!(
+            merged,
+            vec![
+                ("MODE".to_owned(), "open".to_owned()),
+                ("SESSION".to_owned(), "abc".to_owned()),
+            ]
+        );
+
+        // An item without its own variables inherits the response's.
+        let inherited = merge_variables(&response.variables, response.items[1].variables.clone());
+        assert_eq!(inherited.len(), 2);
+        assert!(inherited.contains(&("MODE".to_owned(), "list".to_owned())));
     }
 
     #[test]
