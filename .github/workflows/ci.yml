@@ -1,0 +1,71 @@
+# Continuous integration for every push and pull request.
+#
+# No toolchain action anywhere: rustup on the runner reads
+# rust-toolchain.toml, so the pinned 1.98.0 is what builds — the same
+# toolchain a contributor gets locally.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: fmt, clippy, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libsqlite3-dev pkg-config just
+      - uses: Swatinem/rust-cache@v2
+      - name: Formatting
+        run: cargo fmt --check
+      - name: Clippy
+        # Pedantic as warnings, not denials — the project standard. The job
+        # fails on compile errors and ordinary warnings-as-errors stays off,
+        # matching `just check`.
+        run: just check --locked
+      - name: Tests
+        run: just test --locked
+
+  metadata:
+    name: desktop entries and metainfo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            desktop-file-utils appstream just
+      # `--no-net` inside `just validate`: a fork's PR cannot reach URLs that
+      # only exist after merge. Run the networked pass by hand before tagging.
+      - run: just validate
+
+  vendored:
+    name: vendored offline resolution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libsqlite3-dev pkg-config just
+      # Packagers build from the vendor tarball because libcosmic is a git
+      # dependency. This proves `just vendor` still produces a tree that
+      # resolves offline — a frozen check, not the full LTO release build,
+      # which the release workflow already exercises.
+      - name: Vendor and resolve offline
+        run: |
+          just vendor
+          just vendor-extract
+          cargo check --workspace --frozen --offline

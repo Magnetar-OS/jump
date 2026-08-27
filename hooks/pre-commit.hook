@@ -1,0 +1,5 @@
+#!/bin/sh
+# Formatting gate, as the shipping COSMIC apps carry.
+# Enable with:  git config core.hooksPath hooks
+#          or:  ln -s ../../hooks/pre-commit.hook .git/hooks/pre-commit
+cargo fmt --all --check
