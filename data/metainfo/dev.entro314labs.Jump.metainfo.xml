@@ -47,12 +47,19 @@
 
   <url type="homepage">https://github.com/entro314-labs/jump</url>
   <url type="bugtracker">https://github.com/entro314-labs/jump/issues</url>
+  <url type="vcs-browser">https://github.com/entro314-labs/jump</url>
 
   <developer id="dev.entro314labs">
     <name>entro314 labs</name>
   </developer>
 
   <content_rating type="oars-1.1" />
+
+  <!-- Software-centre accent, sampled from the app icon's blue. -->
+  <branding>
+    <color type="primary" scheme_preference="light">#9fc0fb</color>
+    <color type="primary" scheme_preference="dark">#2b2f45</color>
+  </branding>
 
   <!-- The launcher reads the user's files to index them, and remembers what has
        been copied. Declaring that here is what lets a software centre show it
