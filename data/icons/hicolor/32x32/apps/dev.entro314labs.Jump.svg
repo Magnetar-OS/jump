@@ -1,0 +1,15 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#2b2f45"/>
+<stop offset="1" stop-color="#1b1e2e"/>
+</linearGradient>
+<linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#9fc0fb"/>
+<stop offset="1" stop-color="#4d7fe0"/>
+</linearGradient>
+</defs>
+<rect x="3" y="3" width="26" height="26" rx="2" fill="url(#plate)"/>
+<circle cx="14.08" cy="14.08" r="5.6" stroke="url(#glass)" stroke-width="2.72" fill="none"/>
+<path d="M18.112 18.112 L24.32 24.32" stroke="url(#glass)" stroke-width="3.04" stroke-linecap="round"/>
+</svg>

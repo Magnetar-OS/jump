@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Jump
+Comment=Open the launcher from the panel
+Exec=jump-applet
+Icon=dev.entro314labs.Jump
+Terminal=false
+Categories=COSMIC;
+NoDisplay=true
+# cosmic-panel reads this to offer the applet in its configuration UI.
+X-CosmicApplet=true
+X-HasAutosize=true

@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Name=Jump
+GenericName=Launcher
+Comment=Search applications, windows, files, and clipboard
+# Running the binary a second time reaches the daemon over D-Bus and toggles the
+# overlay, so the same command both starts and shows it. That is what makes this
+# usable directly as a keyboard shortcut.
+Exec=jump
+Icon=dev.entro314labs.Jump
+Terminal=false
+Categories=Utility;
+Keywords=launcher;search;spotlight;run;
+# The overlay is a layer-shell surface, not a window, so it must not appear in
+# the switcher or the dock.
+NoDisplay=false
+StartupNotify=false
+X-GNOME-UsesNotifications=false

@@ -1,0 +1,6 @@
+name = "Demo"
+description = "Echo the query back as results"
+keyword = "demo"
+query = "./search.sh"
+activate = "./open.sh"
+icon = "utilities-terminal"

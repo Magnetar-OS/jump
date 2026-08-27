@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.entro314labs.Jump</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+
+  <name>Jump</name>
+  <summary>Search applications, windows, files, and clipboard</summary>
+
+  <description>
+    <p>
+      Jump is a launcher for the COSMIC desktop. It opens as an overlay above
+      everything else and searches applications, open windows, files by name,
+      file contents, and clipboard history from one field.
+    </p>
+    <p>
+      An empty query shows Launchpad — every installed application in a grid.
+      Typing switches to search. Results from different providers are ranked on
+      one scale, so a file you asked for by name is not buried under
+      applications that happen to mention it.
+    </p>
+    <ul>
+      <li>Animated overlay with compositor backdrop blur</li>
+      <li>Launchpad grid, full screen or panelled, paged or scrolling</li>
+      <li>Window switching, with matches ranked above launching a second copy</li>
+      <li>File search over a private index, with optional full-text search</li>
+      <li>Clipboard history behind the "clip" keyword</li>
+      <li>Alfred-style plugins, plus every pop-launcher plugin already installed</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">dev.entro314labs.Jump.desktop</launchable>
+
+  <provides>
+    <!-- The marker the COSMIC store and app library filter on. -->
+    <id>com.system76.CosmicApplication</id>
+    <binary>jump</binary>
+  </provides>
+
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+
+  <url type="homepage">https://github.com/entro314-labs/jump</url>
+  <url type="bugtracker">https://github.com/entro314-labs/jump/issues</url>
+
+  <developer id="dev.entro314labs">
+    <name>entro314 labs</name>
+  </developer>
+
+  <content_rating type="oars-1.1" />
+
+  <!-- The launcher reads the user's files to index them, and remembers what has
+       been copied. Declaring that here is what lets a software centre show it
+       before installation rather than after. -->
+  <categories>
+    <category>Utility</category>
+  </categories>
+
+  <keywords>
+    <keyword>launcher</keyword>
+    <keyword>search</keyword>
+    <keyword>spotlight</keyword>
+    <keyword>clipboard</keyword>
+  </keywords>
+
+  <releases>
+    <release version="0.1.0" date="2026-08-18">
+      <description>
+        <p>First release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Jump (daemon)
+Comment=Keeps the launcher warm so it opens instantly
+Exec=jump --daemon
+Icon=dev.entro314labs.Jump
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

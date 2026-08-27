@@ -1,0 +1,48 @@
+# nfpm config for the .deb, .rpm and Arch .pkg.tar.zst — consumed by
+# linux-release-kit's release.yml. The file layout is NOT declared here:
+# the workflow's build_command stages it with the justfile's own
+# `just rootdir=... install`, and the single tree entry below packages
+# whatever the justfile installed. One source of truth for the layout.
+#
+# The RK_* variables are exported by the release workflow; nfpm expands
+# ${VAR} itself. You never edit the version here.
+
+name: jump
+arch: ${RK_DEB_ARCH}
+platform: linux
+version: ${RK_VERSION}
+release: "1"
+section: utils
+priority: optional
+maintainer: Dominikos Pritis <dominikos.pritis@gmail.com>
+vendor: entro314-labs
+homepage: https://github.com/entro314-labs/jump
+license: MPL-2.0
+description: |
+  Search applications, windows, files, and clipboard
+
+# Runtime dependencies, per distro. PROVISIONAL — derived from the -sys
+# crates in Cargo.lock; after the first CI build, trim against
+# `ldd target/release/jump`. The arch names are validated for real by
+# arch-repo.yml's container install test.
+overrides:
+  deb:
+    depends:
+      - libxkbcommon0
+      - libsqlite3-0
+  rpm:
+    depends:
+      - libxkbcommon
+      - sqlite-libs
+  archlinux:
+    depends:
+      - libxkbcommon
+      - sqlite
+
+contents:
+  # Everything `just rootdir=.release-kit/pkgroot install` staged: binaries,
+  # desktop entries, icons, metainfo, services — applets and daemons
+  # included. Modes are preserved from the staging tree.
+  - src: .release-kit/pkgroot/
+    dst: /
+    type: tree

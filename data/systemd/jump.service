@@ -1,0 +1,17 @@
+[Unit]
+Description=Jump launcher daemon
+Documentation=https://github.com/entro314-labs/jump
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+# --daemon starts without mapping the overlay, so autostart does not flash the
+# launcher in the user's face at login.
+ExecStart=%h/.local/bin/jump --daemon
+Restart=on-failure
+RestartSec=2
+Slice=session.slice
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,0 +1,29 @@
+[package]
+name = "jump-core"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+# The engine is deliberately MPL-2.0 while the COSMIC frontend is GPL-3.0-only:
+# a future GTK4/GNOME frontend links this crate without absorbing the app's
+# licence. Keep UI dependencies out of here to preserve that split.
+license = "MPL-2.0"
+description = "Search engine, ranking, and plugin host for the jump launcher"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+# Protocol types for the pop-launcher IPC service. Using the upstream crate
+# rather than hand-rolled structs keeps us wire-compatible as plugins evolve.
+pop-launcher = "1.2"
+
+futures = "0.3.34"
+thiserror = "2"
+dirs = "6.0"
+
+# Plugin manifests are TOML; plugin *responses* are JSON (Alfred-compatible).
+toml = "1.1"
+rusqlite = { version = "0.40.2", features = ["bundled"] }

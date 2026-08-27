@@ -1,0 +1,85 @@
+# Release pipeline — thin caller for entro314-labs/linux-release-kit.
+# The tag is the trigger; the local half (release.config.json +
+# @entro314labs/release-kit) writes the version, rolls the changelog, tags
+# and pushes. See the kit README for the full contract.
+#
+# TODO once the kit repo is published: pin every kit reference below to a
+# reviewed commit SHA (@<sha>) instead of @main — the workflows run with
+# contents:write and the signing key.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.2.0)'
+        required: true
+        type: string
+      build_targets:
+        description: 'Retry lever: only build these legs (e.g. "linux-aarch64"). Empty = all.'
+        required: false
+        type: string
+        default: ''
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: entro314-labs/linux-release-kit/.github/workflows/release.yml@main
+    permissions:
+      contents: write
+    with:
+      app_display_name: 'Jump'
+      product_name: 'jump'
+      tag: ${{ inputs.tag || '' }}
+      build_targets: ${{ inputs.build_targets || '' }}
+      # The justfile is the single source of truth for the installed layout:
+      # build natively (the legs run on their own architecture), then stage
+      # the full install tree for nfpm's tree entry to package.
+      build_command: |
+        command -v just >/dev/null || { curl --proto '=https' --tlsv1.2 -sSfL https://just.systems/install.sh | sudo bash -s -- --to /usr/local/bin; }
+        cargo build --release --locked
+        just rootdir="$PWD/.release-kit/pkgroot" install
+      binary_path: 'target/release/$RK_BINARY'
+      apt_packages: 'libxkbcommon-dev libsqlite3-dev'
+      # No AppImage yet: the apps ship SVG icons only and the AppImage leg
+      # needs a 256x256 PNG (kit README, icon input). Add 'appimage' here
+      # plus the PNG when wanted.
+      formats: 'deb,rpm,arch'
+    secrets: inherit
+
+  # Self-hosted pacman repository — Arch installs/updates via pacman -Syu,
+  # shared across all entro314-labs apps.
+  arch-repo:
+    needs: release
+    uses: entro314-labs/linux-release-kit/.github/workflows/arch-repo.yml@main
+    with:
+      tag: ${{ inputs.tag || '' }}
+      product_name: 'jump'
+      repo_name: 'entro314labs'
+      pages_repo: 'entro314-labs/arch-repo'
+    secrets: inherit
+
+  # AUR listing. Validates on every release; publishes only when the
+  # AUR_SSH_PRIVATE_KEY secret is set (the AUR is not accepting submissions
+  # at the time of wiring — this stays dormant until the key lands).
+  aur:
+    needs: release
+    uses: entro314-labs/linux-release-kit/.github/workflows/aur.yml@main
+    with:
+      tag: ${{ inputs.tag || '' }}
+      pkgname: 'jump-bin'
+      product_name: 'jump'
+      pkgdesc: 'Search applications, windows, files, and clipboard'
+      url: 'https://github.com/entro314-labs/jump'
+      license: 'MPL-2.0'
+      depends: 'libxkbcommon sqlite'
+      provides: 'jump'
+      conflicts: 'jump'
+      maintainer: 'Dominikos Pritis <dominikos.pritis@gmail.com>'
+    secrets: inherit

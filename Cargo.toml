@@ -1,0 +1,118 @@
+[workspace]
+members = ["crates/jump-core"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.98.0"
+repository = "https://github.com/entro314-labs/jump"
+
+[workspace.dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tokio = { version = "1.53", features = ["full"] }
+tracing = "0.1"
+
+[package]
+name = "jump"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license = "GPL-3.0-only"
+description = "A Spotlight-class launcher for COSMIC and GNOME"
+
+[lib]
+name = "jump"
+path = "src/lib.rs"
+
+[[bin]]
+# The launcher itself. Run again while it is up to toggle the overlay.
+name = "jump"
+path = "src/main.rs"
+
+[[bin]]
+# COSMIC panel applet: a button that activates the launcher.
+name = "jump-applet"
+path = "src/bin/applet.rs"
+
+[[bin]]
+# Settings window. Writes the same cosmic-config store the launcher reads, so
+# changes apply live without either process telling the other.
+name = "jump-settings"
+path = "src/bin/settings.rs"
+
+[dependencies]
+jump-core = { path = "crates/jump-core" }
+
+# The applet activates the launcher over D-Bus rather than spawning a process.
+zbus = { version = "5.19", default-features = false, features = ["tokio"] }
+
+# Discrete-GPU environment for desktop entries marked PrefersNonDefaultGPU.
+# The variables differ per vendor, so they have to be asked for rather than
+# hardcoded; this is the same source cosmic-app-library and cosmic-launcher use.
+switcheroo-control = { git = "https://github.com/pop-os/dbus-settings-bindings" }
+
+# Settings live in cosmic-config; `dirs` is still needed for index and history
+# paths under the XDG data directory.
+dirs = "6.0"
+
+# Clipboard history needs wlr-data-control, which delivers selections
+# regardless of focus. libcosmic re-exports wayland-client but not this
+# protocol, so it is a direct dependency pinned to the version cctk resolves.
+wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
+
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
+i18n-embed-fl = "0.10"
+rust-embed = "8.12"
+ksni = "0.3"
+
+[dependencies.libcosmic]
+git = "https://github.com/pop-os/libcosmic.git"
+# See https://github.com/pop-os/libcosmic/blob/master/Cargo.toml for available features.
+features = [
+    # Accessibility support.
+    "a11y",
+    # Panel applet support, for the jump-applet binary.
+    "applet",
+    # About widget for the app.
+    "about",
+    # Watch config changes via cosmic-settings-daemon rather than polling.
+    "dbus-config",
+    # Desktop-entry enumeration and launching, used by Launchpad mode.
+    "desktop",
+    # Launch applications inside their own systemd scope. Without this a child
+    # inherits the launcher's cgroup, so an app the user started outlives or
+    # dies with the daemon depending on how it was spawned.
+    "desktop-systemd-scope",
+    # Correct shaping for scripts that need it (Arabic, Indic, and friends).
+    # Application names come from arbitrary desktop files, so the grid has to
+    # render whatever is installed.
+    "advanced-shaping",
+    # Required: the overlay is a wlr-layer-shell surface, not an xdg-toplevel.
+    "wayland",
+    # GPU-accelerated rendering — the animation layer depends on it.
+    "wgpu",
+    # Only one launcher may own the layer surface; a second invocation toggles it.
+    "single-instance",
+    # tokio drives the pop-launcher bridge, so the runtime must be shared.
+    "tokio",
+]
+
+[profile.release]
+# The launcher is judged on the first frame after the keybind fires. Optimise
+# for that: fat LTO and a single codegen unit measurably cut cold-start time.
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+strip = "symbols"
+
+# A debug build still has to feel instant when dogfooding, so keep dependencies
+# optimised even in dev. Only our own crates stay unoptimised for fast rebuilds.
+[profile.dev.package."*"]
+opt-level = 3
