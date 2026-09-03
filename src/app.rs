@@ -407,7 +407,7 @@ impl App {
                 key: jump_core::ItemKey(format!("window:{}", window.identifier)),
                 id: 0,
                 title: window.title.clone(),
-                subtitle: format!("Window — {}", window.app_id),
+                subtitle: fl!("window-subtitle", app = window.app_id.as_str()),
                 // Reuse the application's icon so a window looks like the app it
                 // belongs to rather than a generic placeholder.
                 icon: Some(jump_core::Icon::Name(window.app_id.clone())),

@@ -126,3 +126,19 @@ favorite-kind-command = Command
 favorite-kind-plugin = Plugin
 favorite-kind-clipboard = Clipboard
 favorite-kind-link = Link
+
+## Result subtitles carrying counts. Plurals are selected by Fluent, never
+## by Rust: `format!("{n} lines")` says "1 lines", and the rules differ per
+## language in ways an `if count == 1` cannot express.
+window-subtitle = Window — { $app }
+clipboard-chars = Clipboard — { $chars ->
+        [one] { $chars } character
+       *[other] { $chars } characters
+    }
+clipboard-lines-chars = Clipboard — { $lines ->
+        [one] { $lines } line
+       *[other] { $lines } lines
+    }, { $chars ->
+        [one] { $chars } character
+       *[other] { $chars } characters
+    }

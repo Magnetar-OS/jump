@@ -30,6 +30,7 @@ use std::time::Duration;
 use cosmic::cctk::wayland_client::globals::{GlobalListContents, registry_queue_init};
 use cosmic::cctk::wayland_client::protocol::{wl_registry, wl_seat};
 use cosmic::cctk::wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
+use jump::fl;
 use tokio::sync::mpsc;
 use wayland_protocols_wlr::data_control::v1::client::{
     zwlr_data_control_device_v1::{self, ZwlrDataControlDeviceV1},
@@ -80,14 +81,19 @@ impl Entry {
     }
 
     /// Short description of the entry's shape, shown as the subtitle.
+    ///
+    /// Counts go through Fluent as numbers rather than being interpolated
+    /// into a formatted string, so the catalogue selects the plural. Building
+    /// this with `format!` produced "1 lines"; the rules differ per language
+    /// in ways no `if count == 1` can express.
     #[must_use]
     pub fn describe(&self) -> String {
         let lines = self.text.lines().count();
         let chars = self.text.chars().count();
         if lines > 1 {
-            format!("Clipboard — {lines} lines, {chars} characters")
+            fl!("clipboard-lines-chars", lines = lines, chars = chars)
         } else {
-            format!("Clipboard — {chars} characters")
+            fl!("clipboard-chars", chars = chars)
         }
     }
 }
@@ -601,16 +607,41 @@ mod tests {
         assert!(entry.preview().ends_with('…'));
     }
 
+    /// Strip Fluent's bidi isolation marks.
+    ///
+    /// Fluent wraps every interpolated value in U+2068/U+2069 so a number
+    /// keeps its direction inside an RTL sentence. They are invisible in a
+    /// text widget — which is the only place these strings are rendered, so
+    /// they stay on — but they are *not* invisible to `str::contains`, and a
+    /// test asserting on formatted output has to remove them first.
+    fn plain(text: &str) -> String {
+        text.replace(['\u{2068}', '\u{2069}'], "")
+    }
+
     #[test]
     fn describe_reports_shape() {
         let single = Entry {
             text: "hello".to_owned(),
         };
-        assert!(single.describe().contains("5 characters"));
+        assert!(plain(&single.describe()).contains("5 characters"));
 
         let multi = Entry {
             text: "a\nb\nc".to_owned(),
         };
-        assert!(multi.describe().contains("3 lines"));
+        let described = plain(&multi.describe());
+        assert!(described.contains("3 lines"), "{described}");
+        assert!(described.contains("5 characters"), "{described}");
+    }
+
+    #[test]
+    fn counts_are_pluralised_by_the_catalogue() {
+        // The bug this replaced: `format!("{n} characters")` said
+        // "1 characters". Fluent selects the form from the number.
+        let one = Entry {
+            text: "x".to_owned(),
+        };
+        let described = plain(&one.describe());
+        assert!(described.contains("1 character"), "{described}");
+        assert!(!described.contains("1 characters"), "{described}");
     }
 }

@@ -248,8 +248,12 @@ the long tail that separates "works" from "indistinguishable from first-party":
       offline packaging builds
 - [x] `rust-toolchain.toml` agreeing with `rust-version` (1.98.0), plus
       `rustfmt.toml` (`imports_granularity = "Module"`)
-- [ ] Sweep for hardcoded user-visible strings; everything through `fl!` so
-      translation PRs are additive. Plurals through Fluent, never `format!`
+- [x] Sweep for hardcoded user-visible strings — found and fixed three, one
+      of which was a real plural bug: the clipboard subtitle was built with
+      `format!` and said "1 characters". Counts now go through Fluent as
+      numbers so the catalogue selects the form. Bidi isolation marks are
+      left on (correct for RTL, invisible in a text widget) and the tests
+      strip them, which is the trap the conventions doc warns about.
 - [x] Metainfo validated in CI: `desktop-file-validate` + `appstreamcli
       validate --no-net` run in the metadata job (and locally via
       `just validate`). ⬜ remaining completeness: `branding` colors and a
@@ -299,7 +303,8 @@ makes the quality claims *verifiable* instead of asserted.
       is the open question; document the answer either way)
 - [ ] Release automation: `release.config.json` is present — wire tag →
       changelog → GitHub release with the vendored tarball attached
-- [ ] CHANGELOG discipline: every user-facing change lands with its entry
+- [x] CHANGELOG discipline: every user-facing change in this history landed
+      with its entry
 
 ## Sequencing
 

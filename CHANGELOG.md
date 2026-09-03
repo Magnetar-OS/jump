@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Clipboard subtitles said "1 characters"; counts are pluralised by the
+  Fluent catalogue now, which also makes them translatable.
+- Window subtitles and clipboard subtitles were hardcoded English; both go
+  through the catalogue.
+
 ### Added
 
 - Emoji search: `emoji party` lists matching emoji by name and shortcode;
