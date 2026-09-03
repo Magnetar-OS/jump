@@ -24,6 +24,9 @@ All notable changes to this project are documented here. The format follows
   it to a COSMIC custom shortcut for a per-command hotkey, e.g.
   `jump show clip` straight into clipboard history.
 - The action panel offers "Copy Link" on web results.
+- Window management from the action panel (Ctrl+K on a window result):
+  Maximize/Restore, Minimize, and Full Screen/Exit Full Screen, with the
+  entries following the window's current state.
 - Keyword aliases: the `plugin_keywords` setting overrides any plugin's
   keyword without editing its manifest (empty removes the keyword).
 - Favorites: every result's action panel (Ctrl+K) offers "Pin on Top";

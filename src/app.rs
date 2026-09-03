@@ -949,6 +949,24 @@ impl App {
                 jump_core::process::terminate(pid, true);
                 self.dismiss()
             }
+            actions::Kind::Window(command) => {
+                // Dismiss afterwards: the change happens behind a full-screen
+                // overlay, and staying open would hide exactly the thing the
+                // user just asked to see happen.
+                if let (Some(item), Some(toplevels)) =
+                    (self.results.get(self.selected), self.toplevels.as_ref())
+                    && let Source::Window { identifier } = &item.source
+                {
+                    match command {
+                        actions::WindowCommand::Maximize => toplevels.maximize(identifier),
+                        actions::WindowCommand::Unmaximize => toplevels.unmaximize(identifier),
+                        actions::WindowCommand::Minimize => toplevels.minimize(identifier),
+                        actions::WindowCommand::Fullscreen => toplevels.fullscreen(identifier),
+                        actions::WindowCommand::Unfullscreen => toplevels.unfullscreen(identifier),
+                    }
+                }
+                self.dismiss()
+            }
             actions::Kind::TogglePin { key } => {
                 // Housekeeping like Close Window: the launcher stays open and
                 // shows the new order immediately.
@@ -1502,7 +1520,15 @@ impl cosmic::Application for App {
                     .favorites
                     .iter()
                     .any(|key| key == item.key.as_str());
-                self.actions = actions::Panel::for_item(item, pinned);
+                // The window's live state decides Maximize against Restore.
+                let window = if let Source::Window { identifier } = &item.source {
+                    self.windows
+                        .iter()
+                        .find(|window| &window.identifier == identifier)
+                } else {
+                    None
+                };
+                self.actions = actions::Panel::for_item(item, pinned, window);
                 tracing::debug!(
                     actions = self.actions.as_ref().map_or(0, |panel| panel.actions.len()),
                     "action panel opened"

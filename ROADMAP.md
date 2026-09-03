@@ -40,7 +40,7 @@ fit — jump's plugin format is already Alfred's script-filter contract).
 | Snippets / text expansion | ✅ | ⬜ | Buildable: cosmic-comp advertises `zwp_virtual_keyboard_manager_v1` (measured on a live 1.5 session). Injection needs a custom keymap, wtype-style — real work, but no protocol blocker |
 | Quicklinks (URL templates) | ✅ | ✅ | `quicklinks` setting: keyworded URL templates, claiming the query; simpler than bundling plugins and live-reloads with the config store |
 | Window switching | ✅ | ✅ | `ext-foreign-toplevel-list`, merged into search, Ctrl+W closes |
-| Window management commands | ✅ | ⬜ | Protocol confirmed: `zcosmic_toplevel_manager_v1` v4 and `ext_workspace_manager_v1` are advertised (measured); maximize / minimize / move-to-workspace are implementable |
+| Window management commands | ✅ | ✅ | Maximize/Restore, Minimize, Full Screen/Exit in a window's action panel, over `zcosmic_toplevel_manager_v1`; entries follow the window's live state |
 | System commands | ✅ | ✅ | Dark/light toggle, Settings deep links; session commands via pop-launcher |
 | Media control | ✅ | ✅ | MPRIS play/pause/next/prev, current track in the subtitle |
 | Power profiles | — | ✅ | power-profiles-daemon |
@@ -121,11 +121,14 @@ flow through the bridge).
 - [x] "What's playing" inline in the media commands' subtitles: fetched off
       the frame when the overlay opens, re-running a visible search when the
       answer arrives — the match path itself stays synchronous.
-- [ ] Window management commands over `cosmic-toplevel-management`:
-      maximize, minimize, move to workspace. The protocols are there —
-      `zcosmic_toplevel_manager_v1` v4 and `ext_workspace_manager_v1`,
-      measured on a live 1.5 session — what remains is verifying which
-      requests cosmic-comp honours from a third-party client.
+- [x] Window management commands over `zcosmic_toplevel_manager_v1`:
+      Maximize/Restore, Minimize, Full Screen/Exit Full Screen in a window
+      result's action panel. The entries are chosen from the toplevel's
+      *live* state (`ToplevelInfo.state`), so a maximized window offers
+      Restore rather than a blind toggle, and a compositor that speaks only
+      the foreign-toplevel list offers none of them rather than sending
+      requests it would drop. ⬜ move-to-workspace over
+      `ext_workspace_manager_v1`.
 - [ ] Bluetooth device connect/disconnect via bluez
 - [ ] Wi-Fi network switching via NetworkManager
 - [x] Process search + kill: `kill …` lists the user's own processes by

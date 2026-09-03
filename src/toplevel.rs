@@ -21,7 +21,9 @@
 
 use std::sync::mpsc as std_mpsc;
 
-use cosmic::cctk::cosmic_protocols::toplevel_info::v1::client::zcosmic_toplevel_handle_v1::ZcosmicToplevelHandleV1;
+use cosmic::cctk::cosmic_protocols::toplevel_info::v1::client::zcosmic_toplevel_handle_v1::{
+    self, ZcosmicToplevelHandleV1,
+};
 use cosmic::cctk::cosmic_protocols::toplevel_management::v1::client::zcosmic_toplevel_manager_v1::ZcosmicToplelevelManagementCapabilitiesV1;
 use cosmic::cctk::sctk::output::{OutputHandler, OutputState};
 use cosmic::cctk::sctk::registry::{ProvidesRegistryState, RegistryState};
@@ -43,6 +45,10 @@ pub struct Window {
     pub identifier: String,
     pub title: String,
     pub app_id: String,
+    /// Current compositor state, so the action panel can label Maximize
+    /// against Restore truthfully instead of offering a blind toggle.
+    pub maximized: bool,
+    pub fullscreen: bool,
 }
 
 /// A request from the UI thread to the Wayland thread.
@@ -51,6 +57,11 @@ enum Request {
     Activate(String),
     /// Ask the window with this identifier to close.
     Close(String),
+    Maximize(String),
+    Unmaximize(String),
+    Minimize(String),
+    Fullscreen(String),
+    Unfullscreen(String),
 }
 
 /// Handle used by the application to drive the switcher.
@@ -68,6 +79,32 @@ impl Toplevels {
     /// Ask a window to close.
     pub fn close(&self, identifier: &str) {
         let _ = self.requests.send(Request::Close(identifier.to_owned()));
+    }
+
+    pub fn maximize(&self, identifier: &str) {
+        let _ = self.requests.send(Request::Maximize(identifier.to_owned()));
+    }
+
+    pub fn unmaximize(&self, identifier: &str) {
+        let _ = self
+            .requests
+            .send(Request::Unmaximize(identifier.to_owned()));
+    }
+
+    pub fn minimize(&self, identifier: &str) {
+        let _ = self.requests.send(Request::Minimize(identifier.to_owned()));
+    }
+
+    pub fn fullscreen(&self, identifier: &str) {
+        let _ = self
+            .requests
+            .send(Request::Fullscreen(identifier.to_owned()));
+    }
+
+    pub fn unfullscreen(&self, identifier: &str) {
+        let _ = self
+            .requests
+            .send(Request::Unfullscreen(identifier.to_owned()));
     }
 }
 
@@ -183,6 +220,12 @@ impl State {
                 identifier: info.identifier.clone(),
                 title: info.title.clone(),
                 app_id: info.app_id.clone(),
+                maximized: info
+                    .state
+                    .contains(&zcosmic_toplevel_handle_v1::State::Maximized),
+                fullscreen: info
+                    .state
+                    .contains(&zcosmic_toplevel_handle_v1::State::Fullscreen),
             })
             .collect();
 
@@ -204,9 +247,14 @@ impl State {
     }
 
     fn handle(&mut self, request: &Request, _qh: &QueueHandle<Self>) {
-        let (identifier, activate) = match request {
-            Request::Activate(identifier) => (identifier, true),
-            Request::Close(identifier) => (identifier, false),
+        let identifier = match request {
+            Request::Activate(identifier)
+            | Request::Close(identifier)
+            | Request::Maximize(identifier)
+            | Request::Unmaximize(identifier)
+            | Request::Minimize(identifier)
+            | Request::Fullscreen(identifier)
+            | Request::Unfullscreen(identifier) => identifier,
         };
 
         let Some(handle) = self.handle_for(identifier) else {
@@ -217,16 +265,23 @@ impl State {
             return;
         };
 
-        if activate {
-            // Activation is addressed to a seat. The first is the
-            // pointer/keyboard seat on any single-seat setup.
-            let Some(seat) = self.seat_state.seats().next() else {
-                tracing::warn!("no seat available to activate a window");
-                return;
-            };
-            manager.manager.activate(&handle, &seat);
-        } else {
-            manager.manager.close(&handle);
+        match request {
+            Request::Activate(_) => {
+                // Activation is addressed to a seat. The first is the
+                // pointer/keyboard seat on any single-seat setup.
+                let Some(seat) = self.seat_state.seats().next() else {
+                    tracing::warn!("no seat available to activate a window");
+                    return;
+                };
+                manager.manager.activate(&handle, &seat);
+            }
+            Request::Close(_) => manager.manager.close(&handle),
+            Request::Maximize(_) => manager.manager.set_maximized(&handle),
+            Request::Unmaximize(_) => manager.manager.unset_maximized(&handle),
+            Request::Minimize(_) => manager.manager.set_minimized(&handle),
+            // The compositor picks the output when none is named.
+            Request::Fullscreen(_) => manager.manager.set_fullscreen(&handle, None),
+            Request::Unfullscreen(_) => manager.manager.unset_fullscreen(&handle),
         }
     }
 }
