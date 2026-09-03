@@ -112,3 +112,17 @@ device-wifi-connected = Wi-Fi network — connected
 
 ## Key hints shown in the action panel
 key-enter = Enter
+
+## Settings: plugin keywords and favorites
+keyword-none = no keyword
+section-favorites = Pinned results
+favorites-none = Nothing pinned yet
+favorites-hint = Press Ctrl+K on any result and choose Pin on Top.
+favorites-remove = Remove
+favorite-kind-application = Application
+favorite-kind-file = File
+favorite-kind-window = Window
+favorite-kind-command = Command
+favorite-kind-plugin = Plugin
+favorite-kind-clipboard = Clipboard
+favorite-kind-link = Link

@@ -79,6 +79,11 @@ enum Message {
     RefreshHours(f32),
     /// Enable or disable the plugin with this id.
     PluginEnabled(String, bool),
+    /// Override the keyword the plugin with this id answers to. An empty
+    /// string clears the override, restoring the manifest's own keyword.
+    PluginKeyword(String, String),
+    /// Unpin the favorite with this result key.
+    UnpinFavorite(String),
 }
 
 /// Labels for the layout dropdown, in the order the variants are offered.
@@ -164,6 +169,23 @@ impl cosmic::Application for App {
             Message::Content(value) => self.config.files.content = value,
             Message::ContentMaxMb(value) => self.config.files.content_max_mb = value as u64,
             Message::RefreshHours(value) => self.config.files.refresh_hours = value as u64,
+            Message::PluginKeyword(id, keyword) => {
+                let keyword = keyword.trim().to_owned();
+                self.config
+                    .plugin_keywords
+                    .retain(|(entry, _)| entry != &id);
+                // An empty field means "no override", not "no keyword": the
+                // manifest's own keyword comes back rather than the plugin
+                // silently starting to answer every keystroke.
+                if !keyword.is_empty() {
+                    self.config.plugin_keywords.push((id, keyword));
+                }
+            }
+
+            Message::UnpinFavorite(key) => {
+                self.config.favorites.retain(|entry| entry != &key);
+            }
+
             Message::PluginEnabled(id, enabled) => {
                 if enabled {
                     self.config.disabled_plugins.retain(|entry| entry != &id);
@@ -281,16 +303,62 @@ impl cosmic::Application for App {
             self.plugins.iter().fold(
                 settings::section().title(fl!("section-plugins")),
                 |section, (id, name, keyword)| {
-                    let label = match keyword {
-                        Some(keyword) => format!("{name} · {keyword}"),
-                        None => name.clone(),
-                    };
                     let enabled = !self.config.disabled_plugins.contains(id);
-                    let id = id.clone();
+                    // The override if the user set one, else the field is
+                    // empty and the manifest's keyword shows as a placeholder.
+                    let override_value = self
+                        .config
+                        .plugin_keywords
+                        .iter()
+                        .find(|(entry, _)| entry == id)
+                        .map(|(_, keyword)| keyword.clone())
+                        .unwrap_or_default();
+
+                    let keyword_id = id.clone();
+                    let toggle_id = id.clone();
                     section.add(settings::item(
-                        label,
-                        widget::toggler(enabled)
-                            .on_toggle(move |value| Message::PluginEnabled(id.clone(), value)),
+                        name.clone(),
+                        widget::row::with_children(vec![
+                            widget::text_input(
+                                keyword.clone().unwrap_or_else(|| fl!("keyword-none")),
+                                override_value,
+                            )
+                            .on_input(move |value| {
+                                Message::PluginKeyword(keyword_id.clone(), value)
+                            })
+                            .width(Length::Fixed(140.0))
+                            .into(),
+                            widget::toggler(enabled)
+                                .on_toggle(move |value| {
+                                    Message::PluginEnabled(toggle_id.clone(), value)
+                                })
+                                .into(),
+                        ])
+                        .spacing(12)
+                        .align_y(cosmic::iced::Alignment::Center),
+                    ))
+                },
+            )
+        };
+
+        let favorites = if self.config.favorites.is_empty() {
+            settings::section().title(fl!("section-favorites")).add(
+                widget::column::with_children(vec![
+                    widget::text::body(fl!("favorites-none")).into(),
+                    widget::text::caption(fl!("favorites-hint")).into(),
+                ])
+                .spacing(4),
+            )
+        } else {
+            self.config.favorites.iter().fold(
+                settings::section().title(fl!("section-favorites")),
+                |section, key| {
+                    let remove = key.clone();
+                    section.add(settings::item(
+                        favorite_label(key),
+                        widget::button::text(fl!("favorites-remove"))
+                            .class(cosmic::theme::Button::Destructive)
+                            .on_press(Message::UnpinFavorite(remove)),
                     ))
                 },
             )
@@ -307,6 +375,7 @@ impl cosmic::Application for App {
             launchpad.into(),
             files.into(),
             plugins.into(),
+            favorites.into(),
             note.into(),
         ])
         .spacing(20)
@@ -331,6 +400,30 @@ impl App {
             tracing::error!(%error, "could not save settings");
         }
     }
+}
+
+/// A pinned result's key rendered for a person.
+///
+/// Keys are internal addresses — `entry:Firefox\u{1f}Web Browser`,
+/// `system:dark-mode` — so the source prefix becomes a plain word and the
+/// unit-separator between an entry's name and description becomes a dash.
+/// The alternative is showing the user a control-character-laden string and
+/// expecting them to recognise what they pinned.
+fn favorite_label(key: &str) -> String {
+    let (kind, rest) = key.split_once(':').unwrap_or(("", key));
+    let rest = rest.replace('\u{1f}', " — ");
+
+    let kind = match kind {
+        "entry" => fl!("favorite-kind-application"),
+        "file" => fl!("favorite-kind-file"),
+        "window" => fl!("favorite-kind-window"),
+        "system" => fl!("favorite-kind-command"),
+        "plugin" => fl!("favorite-kind-plugin"),
+        "clip" => fl!("favorite-kind-clipboard"),
+        "quicklink" | "fallback" => fl!("favorite-kind-link"),
+        _ => return rest,
+    };
+    format!("{rest}  ·  {kind}")
 }
 
 /// A slider that reports continuously, so dragging shows live feedback.

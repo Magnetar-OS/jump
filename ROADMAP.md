@@ -50,7 +50,7 @@ fit — jump's plugin format is already Alfred's script-filter contract).
 | Action panel (⌘K) | ✅ | ✅ | Ctrl+K, keyboard-first, plugin `mods` as entries, per-action key hints shown |
 | Extensions / plugin API | ✅ | ✅ | Script-filter contract + pop-launcher plugins. ⬜ devex tooling below |
 | Extension store | ✅ | 🚫→✅ | No store service by design. System-wide plugin dir (`/usr/share/jump/plugins`) for distro packages, plus a reviewed list in [`docs/plugins.md`](docs/plugins.md) |
-| Per-command aliases & hotkeys | ✅ | ✅ | CLI deep links (`jump show clip` bound to a COSMIC custom shortcut) + `plugin_keywords` overrides; settings-window editor pending |
+| Per-command aliases & hotkeys | ✅ | ✅ | CLI deep links (`jump show clip` bound to a COSMIC custom shortcut) + a keyword field per plugin in Settings |
 | Favorites / pinned results | ✅ | ✅ | Pin on Top in the action panel; pinned matches rank above everything |
 | Fallback searches | ✅ | ✅ | `fallbacks` setting; rows appended below every search's results |
 | Menu-bar search of frontmost app | ✅ | 🚫 | No Wayland protocol exposes another client's menus; not buildable honestly |
@@ -213,12 +213,16 @@ second dimension of interaction on each row.
 - [ ] Search-provider section: toggle and re-order providers (windows, files,
       content, clipboard, system, each pop-launcher plugin)
 - [ ] Per-provider result caps and the rank weights exposed as "advanced"
-- [x] Keyword overrides: `plugin_keywords` maps a plugin id to a replacement
-      keyword without editing its manifest — the aliases feature. An empty
-      keyword removes it. ⬜ the settings-window editor on top of it.
+- [x] Keyword editor: `plugin_keywords` maps a plugin id to a replacement
+      keyword without editing its manifest — the aliases feature — with a
+      field per plugin in the settings window. The manifest's own keyword
+      shows as the placeholder, so clearing the field restores it rather
+      than leaving the plugin keywordless.
 - [x] Favorites: Pin on Top in every result's action panel; a pinned result
       that matches the query at all ranks above everything unpinned
-      (`favorites` config key). ⬜ manage the list in the settings window.
+      (`favorites` config key), managed from a Pinned results section in the
+      settings window that renders each internal key as something a person
+      can recognise.
 - [x] CLI deep links: `jump show <query>` opens with the query pre-filled,
       forwarded to the running daemon over D-Bus — a COSMIC custom shortcut
       bound to `jump show clip` is a per-command hotkey without jump owning

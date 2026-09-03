@@ -24,6 +24,9 @@ All notable changes to this project are documented here. The format follows
   it to a COSMIC custom shortcut for a per-command hotkey, e.g.
   `jump show clip` straight into clipboard history.
 - The action panel offers "Copy Link" on web results.
+- Settings window: a keyword field per plugin (the manifest's keyword is the
+  placeholder, so clearing restores it) and a Pinned results section for
+  managing favorites.
 - Performance budgets for the interactive path, run as tests and printed by
   `just bench`.
 - A reviewed plugin directory in `docs/plugins.md`, with the trust model
