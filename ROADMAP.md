@@ -49,7 +49,7 @@ fit — jump's plugin format is already Alfred's script-filter contract).
 | Bluetooth / Wi-Fi control | ✅ | ✅ | Paired bluez devices connect/disconnect; saved NetworkManager Wi-Fi networks connect/disconnect, matched by name or by "bluetooth"/"wifi" |
 | Action panel (⌘K) | ✅ | ✅ | Ctrl+K, keyboard-first, plugin `mods` as entries, per-action key hints shown |
 | Extensions / plugin API | ✅ | ✅ | Script-filter contract + pop-launcher plugins. ⬜ devex tooling below |
-| Extension store | ✅ | 🚫→🔶 | No store service. System-wide plugin dir (`/usr/share/jump/plugins`) ✅; curated plugin list in the repo ⬜ |
+| Extension store | ✅ | 🚫→✅ | No store service by design. System-wide plugin dir (`/usr/share/jump/plugins`) for distro packages, plus a reviewed list in [`docs/plugins.md`](docs/plugins.md) |
 | Per-command aliases & hotkeys | ✅ | ✅ | CLI deep links (`jump show clip` bound to a COSMIC custom shortcut) + `plugin_keywords` overrides; settings-window editor pending |
 | Favorites / pinned results | ✅ | ✅ | Pin on Top in the action panel; pinned matches rank above everything |
 | Fallback searches | ✅ | ✅ | `fallbacks` setting; rows appended below every search's results |
@@ -94,7 +94,10 @@ keep working through the service alongside it.
       `quicklinks` config key rather than bundled plugins, because a config
       list live-reloads, needs no scripts on disk, and the settings window
       can grow an editor for it (pillar 4).
-- [ ] Curated plugin list in the repository (the store, without a service).
+- [x] Curated plugin list in the repository ([`docs/plugins.md`](docs/plugins.md))
+      — the store without a store service: a reviewed list, install
+      instructions, and an explicit statement of the trust model, since a
+      plugin runs as the user and nothing sandboxes it.
 - [ ] Import: Alfred workflow converter — script filters map nearly 1:1.
 
 ## Pillar 2 — Deep integration
@@ -277,11 +280,14 @@ makes the quality claims *verifiable* instead of asserted.
       `frecency.rs` decay, `plugin.rs` protocol conformance and discovery,
       file-ranking phase one, clipboard capping/permissions, emoji and web
       link matching — 79 tests across engine and frontend
-- [ ] Performance budgets, measured in CI or a `just bench` recipe, not
-      remembered: keybind → first frame (the number the launcher is judged
-      on), keystroke → results painted (pop-launcher answers in 0.5–1.5 ms;
-      the budget is ours to spend), memory resident as a daemon, index build
-      time on the reference corpus
+- [x] Performance budgets for the interactive path, as tests CI runs and
+      `just bench` prints: cross-source ranking, favorite promotion, frecency
+      boost, emoji scan, quicklink expansion. Set several times above the
+      measured cost on purpose — they catch an order-of-magnitude regression
+      (a clone per item, an O(n²) merge), not a busy runner.
+      ⬜ still unmeasured, because they need a live session rather than a
+      test binary: keybind → first frame, daemon resident memory, index
+      build time on a reference corpus.
 - [ ] Time first-run content indexing to completion on a real home directory
       and publish the number (README currently says it has not been done)
 - [ ] Packaging: `packaging/linux` exists — finish deb recipe, AUR/COPR, and

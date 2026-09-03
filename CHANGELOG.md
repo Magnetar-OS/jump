@@ -24,6 +24,10 @@ All notable changes to this project are documented here. The format follows
   it to a COSMIC custom shortcut for a per-command hotkey, e.g.
   `jump show clip` straight into clipboard history.
 - The action panel offers "Copy Link" on web results.
+- Performance budgets for the interactive path, run as tests and printed by
+  `just bench`.
+- A reviewed plugin directory in `docs/plugins.md`, with the trust model
+  stated plainly.
 - Plugin `mods`: alternate actions on modifier+Enter (Ctrl/Alt/Shift/Super),
   also listed in the action panel. Each action row now shows its key hint.
 - Bluetooth and Wi-Fi control: paired Bluetooth devices and saved Wi-Fi

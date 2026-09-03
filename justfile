@@ -64,6 +64,12 @@ check *args:
 test *args:
     cargo test --workspace {{args}}
 
+# Runs the performance budgets with their timings printed. The same test
+# binary CI runs, so a budget that holds here holds there; the output is the
+# table to paste into a performance discussion.
+bench *args:
+    cargo test --release -p jump-core --test budgets {{args}} -- --nocapture --test-threads=1
+
 # Validates the desktop entries and the AppStream metainfo. Nothing else
 # checks them: the compiler never sees these files, and the first thing that
 # does is a software centre. `--no-net` so the check passes without reaching

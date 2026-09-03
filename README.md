@@ -331,6 +331,32 @@ standard `StatusNotifierItem`, which is also what makes the same icon work on KD
 and on GNOME with the AppIndicator extension. Removing the Status Area applet
 removes the icon, so a missing host is handled as normal rather than as an error.
 
+## Performance
+
+The launcher is judged on latency, so the claims are checked rather than
+remembered. `just bench` runs the budgets in release and prints the timings;
+the same tests run under `cargo test`, where they exercise the code but do
+not enforce the numbers — an unoptimised build misses them by an order of
+magnitude, and a test that only passes in one profile is worse than none.
+
+| Stage | Mean |
+|---|---|
+| Cross-source ranking, 180 items including the clone | 29–35 µs |
+| Favorite promotion, 40 pinned keys | 27–31 µs |
+| Frecency boost, 500 recorded entries | 21–26 µs |
+| Emoji search, full-table miss | 83–144 µs |
+| Quicklink template expansion | 127–197 ns |
+
+The whole ranking pipeline costs under 100 µs against pop-launcher's own
+0.5–1.5 ms warm query — a rounding error of the thing it ranks, which is the
+property worth defending. The budgets sit roughly 30× above these numbers on
+purpose: two runs minutes apart varied by 1.7× with machine load, so they are
+an order-of-magnitude regression check, not a stopwatch.
+
+Not yet measured, because they need a live session rather than a test binary:
+keybind → first frame, resident memory as a daemon, and index build time on a
+reference corpus.
+
 ## Known rough edges
 
 - First-run content indexing has not been timed to completion. Priority ordering
