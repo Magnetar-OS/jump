@@ -308,19 +308,22 @@ makes the quality claims *verifiable* instead of asserted.
 
 ## Sequencing
 
-No dates — order only. Each milestone is releasable.
+No dates — order only. Each milestone is releasable. Struck items landed.
 
-- **v0.2 — foundation**: initial commit, CI, toolchain files, tests for
-  `jump-core`, metadata validation, first packaged build. (Pillars 5–6 core)
-- **v0.3 — provider depth**: emoji, process kill, quicklinks, fallback
-  searches, "what's playing", clipboard images. (Pillar 2)
-- **v0.4 — interaction depth**: action panel v2, `mods`, inline detail,
-  grid view, scale-factor and light-theme passes. (Pillars 1, 3)
-- **v0.5 — control**: provider settings, keyword editor/aliases, favorites,
-  CLI deep links, frecency inspector, first-run hints. (Pillar 4)
-- **v0.6 — reach**: Bluetooth, Wi-Fi, window management commands, snippet
-  investigation resolved, plugin scaffolder/linter, Alfred importer,
-  system-wide plugin dir. (Pillars 1, 2)
+- **v0.2 — foundation** ✅: initial commit, CI (fmt, clippy, tests, metadata
+  validation, vendored offline resolution), toolchain files, pre-commit
+  hook, metainfo completed. ⬜ first packaged build still to run.
+- **v0.3 — provider depth** ✅ *except clipboard images*: emoji, process
+  kill, quicklinks, fallback searches, "what's playing".
+- **v0.4 — interaction depth** 🔶: `mods` and per-action key hints landed;
+  inline detail, grid view, scale-factor and light-theme passes remain.
+- **v0.5 — control** 🔶: keyword editor, favorites (with a settings section)
+  and CLI deep links landed; provider toggles, frecency inspector and
+  first-run hints remain.
+- **v0.6 — reach** 🔶: Bluetooth, Wi-Fi, window management commands, the
+  snippet investigation (resolved: the protocol is there), the plugin
+  scaffolder/linter and the system-wide plugin dir all landed. The Alfred
+  workflow importer remains.
 - **v1.0 — parity**: every matrix row is ✅ or 🚫-with-reason, every pillar-5
   item checked, the performance budgets hold in CI, and packaging covers at
   least deb + one rolling distro.
