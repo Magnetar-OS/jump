@@ -27,6 +27,9 @@ pub struct Action {
     pub label: String,
     /// Symbolic icon-theme name.
     pub icon: &'static str,
+    /// Key hint shown at the trailing edge of the row — "Enter", "Ctrl ↵".
+    /// How anybody discovers the shortcut exists at all.
+    pub shortcut: Option<String>,
     pub kind: Kind,
 }
 
@@ -53,6 +56,12 @@ pub enum Kind {
     TogglePin { key: jump_core::ItemKey },
     /// A compositor request against the window this result refers to.
     Window(WindowCommand),
+    /// A plugin item's alternate action, Alfred's `mods`.
+    PluginMod {
+        plugin: String,
+        arg: String,
+        variables: Vec<(String, String)>,
+    },
 }
 
 /// Management requests the compositor honours for a window, chosen from its
@@ -96,6 +105,7 @@ impl Panel {
                 fl!("action-pin")
             },
             icon: "pin-symbolic",
+            shortcut: None,
             kind: Kind::TogglePin {
                 key: item.key.clone(),
             },
@@ -126,6 +136,7 @@ impl Panel {
             .extend(options.into_iter().map(|option| Action {
                 label: option.name,
                 icon: "view-more-symbolic",
+                shortcut: None,
                 kind: Kind::LauncherContext {
                     item,
                     option: option.id,
@@ -139,6 +150,7 @@ fn actions_for(item: &Item, window: Option<&crate::toplevel::Window>) -> Vec<Act
     let primary = |label: String, icon| Action {
         label,
         icon,
+        shortcut: Some(fl!("key-enter")),
         kind: Kind::Primary,
     };
 
@@ -150,18 +162,21 @@ fn actions_for(item: &Item, window: Option<&crate::toplevel::Window>) -> Vec<Act
                 actions.push(Action {
                     label: fl!("action-open-folder"),
                     icon: "folder-open-symbolic",
+                    shortcut: None,
                     kind: Kind::OpenFolder(parent.to_path_buf()),
                 });
             }
             actions.push(Action {
                 label: fl!("action-copy-path"),
                 icon: "edit-copy-symbolic",
+                shortcut: None,
                 kind: Kind::CopyText(path.display().to_string()),
             });
             if trash_available() {
                 actions.push(Action {
                     label: fl!("action-trash"),
                     icon: "user-trash-symbolic",
+                    shortcut: None,
                     kind: Kind::Trash(path.clone()),
                 });
             }
@@ -183,30 +198,35 @@ fn actions_for(item: &Item, window: Option<&crate::toplevel::Window>) -> Vec<Act
                     actions.push(Action {
                         label: fl!("action-restore-window"),
                         icon: "window-restore-symbolic",
+                        shortcut: None,
                         kind: Kind::Window(WindowCommand::Unmaximize),
                     });
                 } else {
                     actions.push(Action {
                         label: fl!("action-maximize-window"),
                         icon: "window-maximize-symbolic",
+                        shortcut: None,
                         kind: Kind::Window(WindowCommand::Maximize),
                     });
                 }
                 actions.push(Action {
                     label: fl!("action-minimize-window"),
                     icon: "window-minimize-symbolic",
+                    shortcut: None,
                     kind: Kind::Window(WindowCommand::Minimize),
                 });
                 if window.fullscreen {
                     actions.push(Action {
                         label: fl!("action-exit-fullscreen"),
                         icon: "view-restore-symbolic",
+                        shortcut: None,
                         kind: Kind::Window(WindowCommand::Unfullscreen),
                     });
                 } else {
                     actions.push(Action {
                         label: fl!("action-fullscreen"),
                         icon: "view-fullscreen-symbolic",
+                        shortcut: None,
                         kind: Kind::Window(WindowCommand::Fullscreen),
                     });
                 }
@@ -215,6 +235,7 @@ fn actions_for(item: &Item, window: Option<&crate::toplevel::Window>) -> Vec<Act
             actions.push(Action {
                 label: fl!("action-close-window"),
                 icon: "window-close-symbolic",
+                shortcut: None,
                 kind: Kind::CloseWindow,
             });
             actions
@@ -223,6 +244,7 @@ fn actions_for(item: &Item, window: Option<&crate::toplevel::Window>) -> Vec<Act
         Source::Clipboard { text } => vec![Action {
             label: fl!("action-copy"),
             icon: "edit-copy-symbolic",
+            shortcut: None,
             kind: Kind::CopyText(text.clone()),
         }],
 
@@ -235,6 +257,7 @@ fn actions_for(item: &Item, window: Option<&crate::toplevel::Window>) -> Vec<Act
             Action {
                 label: fl!("action-force-kill"),
                 icon: "edit-delete-symbolic",
+                shortcut: None,
                 kind: Kind::ForceKill { pid: *pid },
             },
         ],
@@ -244,14 +267,64 @@ fn actions_for(item: &Item, window: Option<&crate::toplevel::Window>) -> Vec<Act
             Action {
                 label: fl!("action-copy-link"),
                 icon: "edit-copy-symbolic",
+                shortcut: None,
                 kind: Kind::CopyText(url.clone()),
             },
         ],
 
-        Source::Plugin { .. } | Source::System { .. } => {
-            vec![primary(fl!("action-run"), "system-run-symbolic")]
+        Source::Plugin { plugin, mods, .. } => {
+            let mut actions = vec![primary(fl!("action-run"), "system-run-symbolic")];
+            // Alternates the plugin declared, each addressable by its own
+            // modifier as well as from this list.
+            actions.extend(mods.iter().map(|alternate| Action {
+                label: if alternate.subtitle.is_empty() {
+                    fl!("action-run")
+                } else {
+                    alternate.subtitle.clone()
+                },
+                icon: "system-run-symbolic",
+                shortcut: Some(modifier_label(&alternate.modifier)),
+                kind: Kind::PluginMod {
+                    plugin: plugin.clone(),
+                    arg: alternate.arg.clone(),
+                    variables: alternate.variables.clone(),
+                },
+            }));
+            actions
         }
+
+        Source::System { .. } => vec![primary(fl!("action-run"), "system-run-symbolic")],
     }
+}
+
+/// The key hint for a plugin modifier, e.g. `ctrl` → "Ctrl ↵".
+fn modifier_label(modifier: &str) -> String {
+    let name = match modifier {
+        "ctrl" => "Ctrl",
+        "alt" => "Alt",
+        "shift" => "Shift",
+        "super" => "Super",
+        other => other,
+    };
+    format!("{name} ↵")
+}
+
+/// The alternate a modifier selects on this item, if any.
+///
+/// This is the modifier+Enter path: the panel need not be open for an
+/// alternate to be reachable, which is the whole point of `mods`.
+#[must_use]
+pub fn mod_for(item: &Item, modifier: &str) -> Option<Kind> {
+    let Source::Plugin { plugin, mods, .. } = &item.source else {
+        return None;
+    };
+    mods.iter()
+        .find(|alternate| alternate.modifier == modifier)
+        .map(|alternate| Kind::PluginMod {
+            plugin: plugin.clone(),
+            arg: alternate.arg.clone(),
+            variables: alternate.variables.clone(),
+        })
 }
 
 /// Whether `gio trash` is available. Checked once: the answer cannot change

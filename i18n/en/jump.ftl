@@ -101,3 +101,14 @@ system-power-subtitle = Switch the system power profile
 ## Process actions
 action-end-process = End Process
 action-force-kill = Force Kill
+
+## Bluetooth devices and Wi-Fi networks
+device-connect = Connect { $name }
+device-disconnect = Disconnect { $name }
+device-bluetooth = Bluetooth device
+device-bluetooth-connected = Bluetooth device — connected
+device-wifi = Wi-Fi network
+device-wifi-connected = Wi-Fi network — connected
+
+## Key hints shown in the action panel
+key-enter = Enter

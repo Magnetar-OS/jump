@@ -50,7 +50,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use tokio::process::Command;
 
-use crate::model::{Icon, Item, ItemKey, Source};
+use crate::model::{Icon, Item, ItemKey, Mod, Source};
 
 /// A plugin that has not answered by this point is abandoned for this query.
 ///
@@ -135,6 +135,40 @@ struct PluginItem {
     /// response's top-level `variables`, the item's own winning.
     #[serde(default)]
     variables: std::collections::HashMap<String, String>,
+    /// Alternate actions on modifier+Enter, Alfred's `mods`, keyed by the
+    /// modifier name. Alfred's `cmd` is accepted and mapped to Super, which
+    /// is the key in that position on a PC keyboard.
+    #[serde(default)]
+    mods: std::collections::HashMap<String, PluginMod>,
+}
+
+/// One alternate action as a plugin writes it.
+#[derive(Debug, Clone, Deserialize)]
+struct PluginMod {
+    #[serde(default)]
+    subtitle: String,
+    #[serde(default)]
+    arg: Option<String>,
+    /// Alfred lets a mod be switched off without removing it.
+    #[serde(default = "default_valid")]
+    valid: bool,
+    #[serde(default)]
+    variables: std::collections::HashMap<String, String>,
+}
+
+/// Modifier names a plugin may use, normalised to what the frontend binds.
+///
+/// Anything unrecognised is dropped rather than guessed at: a mod nobody can
+/// press is worse than no mod, because it takes a row in the action panel.
+fn normalise_modifier(name: &str) -> Option<&'static str> {
+    match name.trim().to_lowercase().as_str() {
+        "ctrl" | "control" => Some("ctrl"),
+        "alt" | "option" => Some("alt"),
+        "shift" => Some("shift"),
+        // Alfred's `cmd` is the key in the Super position on a PC keyboard.
+        "cmd" | "command" | "super" | "meta" => Some("super"),
+        _ => None,
+    }
 }
 
 const fn default_valid() -> bool {
@@ -315,6 +349,33 @@ impl Plugin {
             .map(|item| {
                 let arg = item.arg.unwrap_or_else(|| item.title.clone());
                 let variables = merge_variables(&response_variables, item.variables);
+
+                // Alternates inherit the item's arg and variables unless they
+                // override them, which is what makes the common case — same
+                // payload, different action — a two-line mod.
+                let mut mods: Vec<Mod> = item
+                    .mods
+                    .into_iter()
+                    .filter(|(_, alternate)| alternate.valid)
+                    .filter_map(|(modifier, alternate)| {
+                        let modifier = normalise_modifier(&modifier)?;
+                        let mut merged: std::collections::HashMap<String, String> =
+                            variables.iter().cloned().collect();
+                        merged.extend(alternate.variables);
+                        let mut alternate_variables: Vec<(String, String)> =
+                            merged.into_iter().collect();
+                        alternate_variables.sort();
+
+                        Some(Mod {
+                            modifier: modifier.to_owned(),
+                            subtitle: alternate.subtitle,
+                            arg: alternate.arg.unwrap_or_else(|| arg.clone()),
+                            variables: alternate_variables,
+                        })
+                    })
+                    .collect();
+                // HashMap iteration order is not stable; the action panel is.
+                mods.sort_by(|a, b| a.modifier.cmp(&b.modifier));
                 // Prefer the uid: an item whose arg changes with the query — a
                 // search URL, say — would otherwise get a new identity every
                 // keystroke, and frecency could never learn it.
@@ -341,6 +402,7 @@ impl Plugin {
                         plugin: self.id.clone(),
                         arg,
                         variables,
+                        mods,
                     },
                     autocomplete: item.autocomplete,
                     score: 0.0,
@@ -957,6 +1019,41 @@ mod tests {
         assert_eq!(clamp(0.1), 0.5);
         assert_eq!(clamp(60.0), 5.0);
         assert_eq!(clamp(2.0), 2.0);
+    }
+
+    #[test]
+    fn mods_normalise_inherit_and_override() {
+        let response: PluginResponse = serde_json::from_str(
+            r#"{"variables":{"SESSION":"abc"},
+                "items":[{"title":"repo","arg":"main",
+                  "mods":{
+                    "cmd":{"subtitle":"Open on the web","arg":"https://example.com"},
+                    "alt":{"subtitle":"Copy","variables":{"MODE":"copy"}},
+                    "shift":{"subtitle":"Off","valid":false},
+                    "hyper":{"subtitle":"Unbindable"}
+                  }}]}"#,
+        )
+        .expect("alfred json parses");
+
+        let item = &response.items[0];
+        assert_eq!(normalise_modifier("cmd"), Some("super"));
+        assert_eq!(normalise_modifier("Control"), Some("ctrl"));
+        assert_eq!(normalise_modifier("hyper"), None);
+
+        // valid:false and unbindable modifiers are dropped before they can
+        // take a row in the action panel.
+        let usable: Vec<&String> = item
+            .mods
+            .iter()
+            .filter(|(_, m)| m.valid)
+            .filter(|(name, _)| normalise_modifier(name).is_some())
+            .map(|(name, _)| name)
+            .collect();
+        assert_eq!(usable.len(), 2);
+
+        // An alternate without its own arg inherits the item's.
+        assert_eq!(item.mods["alt"].arg, None);
+        assert_eq!(item.mods["cmd"].arg.as_deref(), Some("https://example.com"));
     }
 
     #[test]

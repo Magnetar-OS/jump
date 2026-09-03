@@ -46,8 +46,8 @@ fit — jump's plugin format is already Alfred's script-filter contract).
 | Power profiles | — | ✅ | power-profiles-daemon |
 | Emoji & symbol picker | ✅ | 🔶 | `emoji …` keyword over compiled-in data; list view today, grid view pending (pillar 3) |
 | Process search + kill | ✅ | ✅ | `kill …` claims the query; SIGTERM on Enter, Force Kill in the action panel |
-| Bluetooth / Wi-Fi control | ✅ | ⬜ | bluez connect/disconnect; NetworkManager network switching |
-| Action panel (⌘K) | ✅ | ✅ | Ctrl+K, keyboard-first. ⬜ v2: plugin `mods`, per-action shortcuts shown |
+| Bluetooth / Wi-Fi control | ✅ | ✅ | Paired bluez devices connect/disconnect; saved NetworkManager Wi-Fi networks connect/disconnect, matched by name or by "bluetooth"/"wifi" |
+| Action panel (⌘K) | ✅ | ✅ | Ctrl+K, keyboard-first, plugin `mods` as entries, per-action key hints shown |
 | Extensions / plugin API | ✅ | ✅ | Script-filter contract + pop-launcher plugins. ⬜ devex tooling below |
 | Extension store | ✅ | 🚫→🔶 | No store service. System-wide plugin dir (`/usr/share/jump/plugins`) ✅; curated plugin list in the repo ⬜ |
 | Per-command aliases & hotkeys | ✅ | ✅ | CLI deep links (`jump show clip` bound to a COSMIC custom shortcut) + `plugin_keywords` overrides; settings-window editor pending |
@@ -72,8 +72,10 @@ keep working through the service alongside it.
       every plugin being allowed to.
 - [x] Per-plugin enable/disable: `disabled_plugins` in the config store, a
       Plugins section in the settings window, applied live via `watch_config`.
-- [ ] `mods` — alternate actions on modifier+Enter (surfaces in the action
-      panel, pillar 3).
+- [x] `mods` — alternate actions on modifier+Enter, also listed in the action
+      panel with their key shown. Alternates inherit the item's `arg` and
+      `variables` unless they override them; `cmd` maps to Super and an
+      unbindable modifier is dropped rather than shown as an unpressable row.
 - [x] Plugin-supplied variables/state between query and activation
       (Alfred's `variables`): top-level and per-item, the item's winning,
       exported into the activation command's environment.
@@ -129,8 +131,15 @@ flow through the bridge).
       the foreign-toplevel list offers none of them rather than sending
       requests it would drop. ⬜ move-to-workspace over
       `ext_workspace_manager_v1`.
-- [ ] Bluetooth device connect/disconnect via bluez
-- [ ] Wi-Fi network switching via NetworkManager
+- [x] Bluetooth device connect/disconnect via bluez, and Wi-Fi network
+      switching via NetworkManager (`src/devices.rs`). Paired devices and
+      saved networks only — connecting to something unpaired needs an agent
+      and a PIN dialog, which is COSMIC Settings' job and already deep-linked.
+      The list is snapshotted when the overlay opens, the same way "what's
+      playing" is, because a bus round trip must never happen on the match
+      path; a device appearing mid-open is missed until the next open, which
+      beats subscribing to two daemons all session for a list looked at for
+      seconds at a time.
 - [x] Process search + kill: `kill …` lists the user's own processes by
       name/cmdline/pid, heaviest first; Enter sends SIGTERM, the action panel
       offers Force Kill. The claim also stops the query fanning out to the
@@ -169,8 +178,11 @@ second dimension of interaction on each row.
       application: pop-launcher's context options ("New Window" and friends)
       appended as they arrive. Keyboard-first: Ctrl+K, arrows, Enter, Escape
       peels one layer.
-- [ ] Action panel v2: plugin `mods`, per-action shortcuts shown in the card,
-      paste-into-frontmost for clipboard entries.
+- [x] Action panel v2 (partial): plugin `mods` as panel entries, and every
+      action's key hint shown at the row's trailing edge — the primary action
+      says "Enter", an alternate says "Ctrl ↵".
+      ⬜ paste-into-frontmost for clipboard entries (needs the virtual-keyboard
+      path, now known to be available).
 - [ ] Inline detail for calculator/conversion results (large-type answer row)
 - [ ] Grid view for visual results (emoji, clipboard images) reusing the
       Launchpad grid machinery

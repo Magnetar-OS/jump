@@ -63,6 +63,8 @@ pub enum Source {
         /// Alfred-style `variables`, exported into the activation command's
         /// environment. Sorted, so two equal items compare equal.
         variables: Vec<(String, String)>,
+        /// Alternate actions on modifier+Enter, Alfred's `mods`.
+        mods: Vec<Mod>,
     },
     /// A built-in command provided by the frontend — toggling dark mode,
     /// opening a settings page. Carries only an identifier so the engine stays
@@ -82,6 +84,25 @@ pub enum Source {
         /// Fully-expanded URL, query already encoded in.
         url: String,
     },
+}
+
+/// An alternate action on a plugin item, Alfred's `mods`.
+///
+/// Held on the item rather than looked up at activation time because the
+/// plugin process that produced it is long gone by then: the payload has to
+/// travel with the row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mod {
+    /// Modifier that selects it — `ctrl`, `alt`, `shift`, `super`. Kept as
+    /// the plugin wrote it, lowercased, so the frontend owns the display
+    /// spelling and the keybinding.
+    pub modifier: String,
+    /// Row text describing what this alternate does.
+    pub subtitle: String,
+    /// Payload handed to the plugin instead of the item's own `arg`.
+    pub arg: String,
+    /// Variables for this alternate, merged the same way the item's are.
+    pub variables: Vec<(String, String)>,
 }
 
 /// An icon to render, resolved by the frontend against the active icon theme.

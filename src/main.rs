@@ -8,6 +8,7 @@ mod anim;
 mod app;
 mod apps;
 mod clipboard;
+mod devices;
 mod launch;
 mod surface;
 mod system;

@@ -41,13 +41,15 @@ enum Action {
 
 /// Work that needs a bus round trip, handed back to the caller to run as an
 /// async task rather than blocking `update`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackgroundTask {
     MediaPlayPause,
     MediaNext,
     MediaPrevious,
     /// Set power-profiles-daemon's active profile.
     PowerProfile(&'static str),
+    /// Connect or disconnect a Bluetooth device or Wi-Fi network.
+    Device(crate::devices::Action),
 }
 
 /// What the caller should do about an activated command.
@@ -334,6 +336,12 @@ pub fn matching(query: &str, now_playing: Option<&str>) -> Vec<Item> {
 
 /// What running the command at `id` amounts to.
 pub fn run(id: &str) -> Option<Outcome> {
+    // Bluetooth and Wi-Fi results are addressed by object path rather than by
+    // a name in the table below, so they are decoded first.
+    if let Some(action) = crate::devices::action_for(id) {
+        return Some(Outcome::Background(BackgroundTask::Device(action)));
+    }
+
     let action = commands(None)
         .into_iter()
         .find(|command| command.id == id)
@@ -358,11 +366,18 @@ pub fn run(id: &str) -> Option<Outcome> {
 /// by the time this runs the launcher has already dismissed, and there is no
 /// UI left to show an error in.
 pub async fn run_background(task: BackgroundTask) {
+    // Device actions log their own failures, since their error type differs.
+    if let BackgroundTask::Device(action) = task {
+        crate::devices::run(action).await;
+        return;
+    }
+
     let result = match task {
         BackgroundTask::MediaPlayPause => media_call("PlayPause").await,
         BackgroundTask::MediaNext => media_call("Next").await,
         BackgroundTask::MediaPrevious => media_call("Previous").await,
         BackgroundTask::PowerProfile(profile) => set_power_profile(profile).await,
+        BackgroundTask::Device(_) => unreachable!("handled above"),
     };
     if let Err(error) = result {
         tracing::warn!(?task, %error, "system command failed");

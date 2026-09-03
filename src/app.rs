@@ -108,6 +108,9 @@ pub enum Message {
     Windows(Vec<Window>),
     /// The current MPRIS track, fetched when the overlay opens.
     NowPlaying(Option<String>),
+    /// Bluetooth devices and Wi-Fi networks, snapshotted when the overlay
+    /// opens — see [`crate::devices`] for why it is a snapshot.
+    Devices(Vec<crate::devices::Device>),
     /// The window-switcher backend came up.
     ToplevelsReady(Toplevels),
     /// Clipboard history changed.
@@ -137,6 +140,9 @@ pub enum Message {
     Activate,
     /// Run a specific row, e.g. from a click.
     ActivateAt(usize),
+    /// Run the highlighted result's alternate for this modifier, Alfred's
+    /// `mods`. Falls back to plain activation when the item has none.
+    ActivateMod(String),
     /// The compositor answered our activation-token request; start the
     /// application the token was requested for.
     Launch(Launch, Option<String>),
@@ -201,6 +207,9 @@ pub struct App {
     /// for the seconds the overlay is up, and re-fetching per open is cheaper
     /// than tracking every player's property changes all session.
     now_playing: Option<String>,
+    /// Connectable Bluetooth devices and saved Wi-Fi networks, snapshotted
+    /// per open for the same reason.
+    devices: Vec<crate::devices::Device>,
     /// `None` when the compositor does not implement wlr-data-control.
     clipboard: Option<Clipboard>,
     selected: usize,
@@ -456,6 +465,7 @@ impl App {
             &self.input,
             self.now_playing.as_deref(),
         ));
+        merged.append(&mut crate::devices::matching(&self.input, &self.devices));
         merged.append(&mut items);
 
         // One scale for every provider. See `jump_core::rank` — concatenating
@@ -725,6 +735,10 @@ impl App {
             Task::perform(system::now_playing(), |track| {
                 cosmic::action::app(Message::NowPlaying(track))
             }),
+            // Same for the device lists the system bus owns.
+            Task::perform(crate::devices::snapshot(), |devices| {
+                cosmic::action::app(Message::Devices(devices))
+            }),
         ])
     }
 
@@ -868,6 +882,7 @@ impl App {
                 plugin,
                 arg,
                 variables,
+                ..
             } => {
                 if let Some(plugin) = self.plugins.get(plugin) {
                     plugin.activate(arg, variables);
@@ -947,6 +962,16 @@ impl App {
             }
             actions::Kind::ForceKill { pid } => {
                 jump_core::process::terminate(pid, true);
+                self.dismiss()
+            }
+            actions::Kind::PluginMod {
+                plugin,
+                arg,
+                variables,
+            } => {
+                if let Some(plugin) = self.plugins.get(&plugin) {
+                    plugin.activate(&arg, &variables);
+                }
                 self.dismiss()
             }
             actions::Kind::Window(command) => {
@@ -1065,6 +1090,7 @@ impl cosmic::Application for App {
             content: None,
             clips: Vec::new(),
             now_playing: None,
+            devices: Vec::new(),
             clipboard: None,
             selected: 0,
             actions: None,
@@ -1370,6 +1396,18 @@ impl cosmic::Application for App {
                 Task::none()
             }
 
+            Message::Devices(devices) => {
+                let changed = devices != self.devices;
+                self.devices = devices;
+                // Device rows are baked into the built results, so a visible
+                // search has to be re-run for them to appear.
+                if changed && !self.input.is_empty() {
+                    let query = self.input.clone();
+                    return self.search(query);
+                }
+                Task::none()
+            }
+
             Message::Windows(windows) => {
                 self.windows = windows;
                 // A window opening or closing while the launcher is up should be
@@ -1474,6 +1512,31 @@ impl cosmic::Application for App {
                     return self.run_action(index);
                 }
                 self.activate(self.selected)
+            }
+
+            Message::ActivateMod(modifier) => {
+                // Modifier+Enter on the highlighted row runs that alternate
+                // directly — the action panel is the discoverable path to the
+                // same thing, not a required one.
+                let Some(kind) = self
+                    .results
+                    .get(self.selected)
+                    .and_then(|item| actions::mod_for(item, &modifier))
+                else {
+                    // No alternate for this modifier: fall back to the plain
+                    // activation, so Ctrl+Enter never does nothing.
+                    return self.activate(self.selected);
+                };
+                self.actions = Some(actions::Panel {
+                    actions: vec![actions::Action {
+                        label: String::new(),
+                        icon: "system-run-symbolic",
+                        shortcut: None,
+                        kind,
+                    }],
+                    selected: 0,
+                });
+                self.run_action(0)
             }
             Message::ActivateAt(index) => self.activate(index),
 
@@ -1678,7 +1741,22 @@ impl cosmic::Application for App {
                 event::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
                     match key {
                         Key::Named(Named::Escape) => Some(Message::Dismiss),
-                        Key::Named(Named::Enter) => Some(Message::Activate),
+                        Key::Named(Named::Enter) => {
+                            // A plugin item's alternates are reached with
+                            // modifier+Enter; everything else ignores the
+                            // modifier and activates normally.
+                            if modifiers.control() {
+                                Some(Message::ActivateMod("ctrl".to_owned()))
+                            } else if modifiers.alt() {
+                                Some(Message::ActivateMod("alt".to_owned()))
+                            } else if modifiers.shift() {
+                                Some(Message::ActivateMod("shift".to_owned()))
+                            } else if modifiers.logo() {
+                                Some(Message::ActivateMod("super".to_owned()))
+                            } else {
+                                Some(Message::Activate)
+                            }
+                        }
                         Key::Named(Named::ArrowDown) => Some(Message::MoveSelection(1)),
                         Key::Named(Named::ArrowUp) => Some(Message::MoveSelection(-1)),
                         // Grid mode reads these as one column; the list treats

@@ -32,8 +32,9 @@ Working and dogfoodable on COSMIC 1.5. Verified on a live session:
   window, run an application's desktop actions
 - Media control (play/pause, next, previous) with the current track shown,
   and power-profile switching
-- Process search and kill behind the `kill` keyword; emoji search behind
-  `emoji`, Enter copies
+- Bluetooth device and Wi-Fi network connect/disconnect, over bluez and
+  NetworkManager
+- Emoji search behind the `emoji` keyword; Enter copies the emoji
 - Quicklinks (keyworded URL templates) and fallback web-search rows below
   every search's results
 - `jump show <query>` opens with the query pre-filled, so a COSMIC custom
@@ -233,6 +234,20 @@ being packed into `arg`. A response carrying `rerun` (seconds, clamped
 0.5–5.0) has its query re-run on that interval while it is on screen, which
 is how a polling plugin streams updates. Individual plugins can be switched
 off from the settings window.
+
+`mods` are alternate actions, reachable both by modifier+Enter on the row and
+from the action panel, where each is labelled with its key:
+
+```json
+{"items": [{"title": "entro314-labs/jump", "arg": "…", "mods": {
+  "ctrl": {"subtitle": "Open on the web", "arg": "https://github.com/…"},
+  "alt":  {"subtitle": "Copy clone URL",  "variables": {"MODE": "clone"}}
+}}]}
+```
+
+An alternate inherits the item's `arg` and `variables` unless it overrides
+them. `cmd` is accepted as a spelling of `super`; a modifier jump cannot bind
+is dropped rather than shown as a row nobody can press.
 
 A keyworded plugin takes the query over entirely: typing `gh jump` addresses
 that plugin and app results are suppressed. The keyword must be followed by a

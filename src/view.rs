@@ -618,35 +618,50 @@ fn action_panel(panel: &actions::Panel, alpha: f32) -> Element<'_, Message> {
     let rows = panel.actions.iter().enumerate().map(|(index, action)| {
         let is_selected = index == panel.selected;
 
-        let content = row::with_children(vec![
+        let mut cells: Vec<Element<'_, Message>> = vec![
             icon::from_name(action.icon).size(16).icon().into(),
             text::body(action.label.as_str())
                 .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
                 .class(cosmic::theme::Text::Color(alpha_text(alpha, true)))
+                // Filling here is what pushes the key hint to the trailing
+                // edge; libcosmic re-exports no spacer widget.
+                .width(Length::Fill)
                 .into(),
-        ])
-        .spacing(10)
-        .align_y(Alignment::Center)
-        .apply(container)
-        .padding([0, 12])
-        .width(Length::Fill)
-        .height(Length::Fixed(ACTION_ROW_HEIGHT))
-        .align_y(Alignment::Center)
-        .class(cosmic::theme::Container::custom(move |theme| {
-            let cosmic = theme.cosmic();
-            container::Style {
-                background: is_selected.then(|| {
-                    let mut tint: Color = cosmic.accent.base.into();
-                    tint.a = SELECTION_OPACITY;
-                    Background::Color(fade(tint, alpha))
-                }),
-                border: cosmic::iced::Border {
-                    radius: (ROW_RADIUS - 6.0).into(),
+        ];
+        // The key hint sits at the trailing edge, dimmed: it is how anyone
+        // discovers the shortcut exists, and it must never compete with the
+        // label for attention.
+        if let Some(shortcut) = action.shortcut.as_deref() {
+            cells.push(
+                text::caption(shortcut)
+                    .class(cosmic::theme::Text::Color(alpha_text(alpha, false)))
+                    .into(),
+            );
+        }
+
+        let content = row::with_children(cells)
+            .spacing(10)
+            .align_y(Alignment::Center)
+            .apply(container)
+            .padding([0, 12])
+            .width(Length::Fill)
+            .height(Length::Fixed(ACTION_ROW_HEIGHT))
+            .align_y(Alignment::Center)
+            .class(cosmic::theme::Container::custom(move |theme| {
+                let cosmic = theme.cosmic();
+                container::Style {
+                    background: is_selected.then(|| {
+                        let mut tint: Color = cosmic.accent.base.into();
+                        tint.a = SELECTION_OPACITY;
+                        Background::Color(fade(tint, alpha))
+                    }),
+                    border: cosmic::iced::Border {
+                        radius: (ROW_RADIUS - 6.0).into(),
+                        ..Default::default()
+                    },
                     ..Default::default()
-                },
-                ..Default::default()
-            }
-        }));
+                }
+            }));
 
         mouse_area(content)
             .on_enter(Message::SelectAction(index))

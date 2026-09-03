@@ -24,6 +24,11 @@ All notable changes to this project are documented here. The format follows
   it to a COSMIC custom shortcut for a per-command hotkey, e.g.
   `jump show clip` straight into clipboard history.
 - The action panel offers "Copy Link" on web results.
+- Plugin `mods`: alternate actions on modifier+Enter (Ctrl/Alt/Shift/Super),
+  also listed in the action panel. Each action row now shows its key hint.
+- Bluetooth and Wi-Fi control: paired Bluetooth devices and saved Wi-Fi
+  networks appear as connect/disconnect results, found by their own name
+  or by typing "bluetooth" or "wifi".
 - Window management from the action panel (Ctrl+K on a window result):
   Maximize/Restore, Minimize, and Full Screen/Exit Full Screen, with the
   entries following the window's current state.
