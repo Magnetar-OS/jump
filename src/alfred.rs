@@ -530,22 +530,27 @@ mod tests {
   </dict>
 </dict></plist>"#;
 
-    fn workspace(label: &str) -> (PathBuf, PathBuf) {
-        let root =
-            std::env::temp_dir().join(format!("jump-alfred-test-{label}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        let workflow = root.join("workflow");
-        let plugins = root.join("plugins");
+    /// A private scratch area per test. The guard must stay bound for the
+    /// test's lifetime — the directory vanishes when it drops. Same `tempfile`
+    /// the production path uses, so the test file does not demonstrate the
+    /// exact pattern the import path exists to avoid.
+    fn workspace() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let root = tempfile::Builder::new()
+            .prefix("jump-alfred-test-")
+            .tempdir()
+            .expect("test workspace");
+        let workflow = root.path().join("workflow");
+        let plugins = root.path().join("plugins");
         std::fs::create_dir_all(&workflow).expect("workflow dir");
         std::fs::create_dir_all(&plugins).expect("plugins dir");
-        (workflow, plugins)
+        (root, workflow, plugins)
     }
 
     #[test]
     fn a_script_filter_becomes_a_runnable_plugin() {
         use std::os::unix::fs::PermissionsExt;
 
-        let (workflow, plugins) = workspace("basic");
+        let (_root, workflow, plugins) = workspace();
         std::fs::write(workflow.join("info.plist"), FIXTURE).expect("fixture");
 
         let import = import(&workflow, &plugins).expect("import succeeds");
@@ -598,7 +603,7 @@ mod tests {
 
     #[test]
     fn a_traversal_keyword_cannot_escape_the_plugin_root() {
-        let (workflow, plugins) = workspace("traversal");
+        let (_root, workflow, plugins) = workspace();
         let fixture = FIXTURE.replace("<string>gh</string>", "<string>../../escape</string>");
         std::fs::write(workflow.join("info.plist"), fixture).expect("fixture");
 
@@ -610,7 +615,7 @@ mod tests {
 
     #[test]
     fn a_hostile_url_never_reaches_the_shell() {
-        let (workflow, plugins) = workspace("injection");
+        let (_root, workflow, plugins) = workspace();
         let hostile = "https://x/$(touch /tmp/pwned)`id`";
         let fixture = FIXTURE.replace("https://github.com/search?q={query}", hostile);
         std::fs::write(workflow.join("info.plist"), fixture).expect("fixture");
@@ -631,7 +636,7 @@ mod tests {
 
     #[test]
     fn importing_twice_refuses_to_overwrite() {
-        let (workflow, plugins) = workspace("twice");
+        let (_root, workflow, plugins) = workspace();
         std::fs::write(workflow.join("info.plist"), FIXTURE).expect("fixture");
 
         import(&workflow, &plugins).expect("first import");
@@ -643,7 +648,7 @@ mod tests {
 
     #[test]
     fn applescript_filters_are_refused_with_a_reason() {
-        let (workflow, plugins) = workspace("osascript");
+        let (_root, workflow, plugins) = workspace();
         let fixture = FIXTURE.replace(
             "<key>type</key><integer>0</integer>",
             "<key>type</key><integer>6</integer>",
@@ -660,7 +665,7 @@ mod tests {
 
     #[test]
     fn a_directory_without_info_plist_is_not_a_workflow() {
-        let (workflow, plugins) = workspace("empty");
+        let (_root, workflow, plugins) = workspace();
         assert!(matches!(
             import(&workflow, &plugins),
             Err(Error::NotAWorkflow)
