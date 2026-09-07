@@ -67,6 +67,8 @@ struct App {
 enum Message {
     Blur(bool),
     ReduceMotion(bool),
+    /// Turn one search provider on or off.
+    Provider(Provider, bool),
     Opacity(f32),
     BackdropOpacity(f32),
     Layout(usize),
@@ -85,6 +87,21 @@ enum Message {
     PluginKeyword(String, String),
     /// Unpin the favorite with this result key.
     UnpinFavorite(String),
+}
+
+/// Which provider a [`Message::Provider`] refers to.
+///
+/// A small enum rather than six message variants: the update arm is then one
+/// match instead of six near-identical assignments, and adding a provider is
+/// one line in each of three places rather than a new message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Provider {
+    Windows,
+    System,
+    Devices,
+    Clipboard,
+    Emoji,
+    Web,
 }
 
 /// Labels for the layout dropdown, in the order the variants are offered.
@@ -149,6 +166,17 @@ impl cosmic::Application for App {
         match message {
             Message::Blur(value) => self.config.blur = value,
             Message::ReduceMotion(value) => self.config.reduce_motion = value,
+            Message::Provider(provider, value) => {
+                let providers = &mut self.config.providers;
+                match provider {
+                    Provider::Windows => providers.windows = value,
+                    Provider::System => providers.system = value,
+                    Provider::Devices => providers.devices = value,
+                    Provider::Clipboard => providers.clipboard = value,
+                    Provider::Emoji => providers.emoji = value,
+                    Provider::Web => providers.web = value,
+                }
+            }
             Message::Opacity(value) => self.config.opacity = value,
             Message::BackdropOpacity(value) => self.config.fullscreen_opacity = value,
             Message::CellSize(value) => self.config.cell_size = value,
@@ -347,6 +375,52 @@ impl cosmic::Application for App {
             )
         };
 
+        // File search has its own section: its switch also governs indexing,
+        // which is work that happens whether or not the launcher is open.
+        let providers = [
+            (
+                Provider::Windows,
+                fl!("provider-windows"),
+                self.config.providers.windows,
+            ),
+            (
+                Provider::System,
+                fl!("provider-system"),
+                self.config.providers.system,
+            ),
+            (
+                Provider::Devices,
+                fl!("provider-devices"),
+                self.config.providers.devices,
+            ),
+            (
+                Provider::Clipboard,
+                fl!("provider-clipboard"),
+                self.config.providers.clipboard,
+            ),
+            (
+                Provider::Emoji,
+                fl!("provider-emoji"),
+                self.config.providers.emoji,
+            ),
+            (
+                Provider::Web,
+                fl!("provider-web"),
+                self.config.providers.web,
+            ),
+        ]
+        .into_iter()
+        .fold(
+            settings::section().title(fl!("section-providers")),
+            |section, (provider, label, enabled)| {
+                section.add(settings::item(
+                    label,
+                    widget::toggler(enabled)
+                        .on_toggle(move |value| Message::Provider(provider, value)),
+                ))
+            },
+        );
+
         let favorites = if self.config.favorites.is_empty() {
             settings::section().title(fl!("section-favorites")).add(
                 widget::column::with_children(vec![
@@ -380,6 +454,7 @@ impl cosmic::Application for App {
             appearance.into(),
             launchpad.into(),
             files.into(),
+            providers.into(),
             plugins.into(),
             favorites.into(),
             note.into(),

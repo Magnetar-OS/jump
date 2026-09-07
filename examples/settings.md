@@ -39,6 +39,28 @@ so a bad value can never stop the launcher from opening.
 | `favorites` | list of strings | `[]` | Pinned result keys; written by the action panel's Pin on Top |
 | `plugin_keywords` | list of `(id, keyword)` | `[]` | Alias a plugin's keyword without editing its manifest; `""` removes the keyword |
 | `files` | struct | see below | File search |
+| `providers` | struct | all `true` | Which providers answer a query, see below |
+
+### `providers`
+
+Which providers are consulted at all. File search is not here: its switch
+lives under `files` because it also governs indexing, which happens whether
+or not the launcher is open.
+
+```ron
+(
+    windows: true,
+    system: true,
+    devices: true,
+    clipboard: true,
+    emoji: true,
+    web: true,
+)
+```
+
+Turning `devices` off also stops the two system-bus round trips that
+snapshot Bluetooth and Wi-Fi each time the launcher opens, so it costs
+nothing rather than merely hiding the results.
 
 ### `quicklinks` and `fallbacks`
 

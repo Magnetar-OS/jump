@@ -145,3 +145,12 @@ clipboard-lines-chars = Clipboard — { $lines ->
 
 ## Motion
 reduce-motion = Reduce motion
+
+## Settings: search providers
+section-providers = Search providers
+provider-windows = Open windows
+provider-system = System commands
+provider-devices = Bluetooth and Wi-Fi
+provider-clipboard = Clipboard history (clip)
+provider-emoji = Emoji (emoji)
+provider-web = Quicklinks and web searches

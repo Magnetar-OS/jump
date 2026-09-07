@@ -144,6 +144,40 @@ impl FileConfig {
     }
 }
 
+/// Which result providers answer a query.
+///
+/// File search has its own switch under [`FileConfig`] because it also
+/// governs indexing, which is work that happens whether or not the launcher
+/// is open. These six only decide whether a provider is consulted.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Providers {
+    /// Open windows, matched by title and application id.
+    pub windows: bool,
+    /// Built-in commands: dark mode, COSMIC Settings pages, media, power.
+    pub system: bool,
+    /// Bluetooth devices and Wi-Fi networks.
+    pub devices: bool,
+    /// Clipboard history behind the `clip` keyword.
+    pub clipboard: bool,
+    /// Emoji behind the `emoji` keyword.
+    pub emoji: bool,
+    /// Quicklinks and the fallback web searches.
+    pub web: bool,
+}
+
+impl Default for Providers {
+    fn default() -> Self {
+        Self {
+            windows: true,
+            system: true,
+            devices: true,
+            clipboard: true,
+            emoji: true,
+            web: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, CosmicConfigEntry)]
 #[version = 1]
 pub struct Config {
@@ -177,6 +211,8 @@ pub struct Config {
     pub disabled_plugins: Vec<String>,
     /// File-search settings.
     pub files: FileConfig,
+    /// Which providers are consulted at all.
+    pub providers: Providers,
     /// Keyworded URL templates. `yt cats` opens the `yt` link's template with
     /// `{query}` replaced by `cats`, claiming the query the way a plugin
     /// keyword does.
@@ -209,6 +245,7 @@ impl Default for Config {
             grid_max_width: 0.72,
             disabled_plugins: Vec::new(),
             files: FileConfig::default(),
+            providers: Providers::default(),
             quicklinks: Vec::new(),
             fallbacks: vec![
                 jump_core::web::Link {

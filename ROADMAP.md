@@ -237,8 +237,13 @@ second dimension of interaction on each row.
       file search corpus, content indexing, plugins on/off) — all applied
       without restart
 - [x] Config in the cosmic-config store, one key per field, versioned
-- [ ] Search-provider section: toggle and re-order providers (windows, files,
-      content, clipboard, system, each pop-launcher plugin)
+- [x] Search-provider section: windows, system commands, Bluetooth/Wi-Fi,
+      clipboard, emoji and web each toggle from Settings (`providers`), applied
+      live. Turning devices off also skips its two bus round trips per open,
+      so a disabled provider costs nothing rather than being merely hidden.
+      File search keeps its own switch under `files`, because that one also
+      governs indexing. ⬜ re-ordering providers, which needs the ranker to
+      take a per-source priority rather than a fixed scale.
 - [ ] Per-provider result caps and the rank weights exposed as "advanced"
 - [x] Keyword editor: `plugin_keywords` maps a plugin id to a replacement
       keyword without editing its manifest — the aliases feature — with a

@@ -296,6 +296,9 @@ impl App {
     /// tokens, and surfacing those next to application results — where a stray
     /// Enter would paste them somewhere — is a bad default.
     fn matching_clips(&self, query: &str) -> Vec<Item> {
+        if !self.config.providers.clipboard {
+            return Vec::new();
+        }
         let Some(rest) = query.strip_prefix(CLIP_KEYWORD) else {
             return Vec::new();
         };
@@ -331,6 +334,9 @@ impl App {
     /// Several links may share a keyword; all of them answer, and the user
     /// picks. The URL is expanded here so activation is a plain open.
     fn matching_quicklinks(&self, query: &str) -> Vec<Item> {
+        if !self.config.providers.web {
+            return Vec::new();
+        }
         self.config
             .quicklinks
             .iter()
@@ -365,6 +371,9 @@ impl App {
     /// are where to go when the answers were not it, so they belong at the
     /// bottom in configuration order regardless of scores.
     fn fallback_items(&self, query: &str) -> Vec<Item> {
+        if !self.config.providers.web {
+            return Vec::new();
+        }
         self.config
             .fallbacks
             .iter()
@@ -392,7 +401,7 @@ impl App {
     /// than a couple of dozen windows, and a user reaching for one is usually
     /// typing the words they can literally see in its title bar.
     fn matching_windows(&self, query: &str) -> Vec<Item> {
-        if query.is_empty() {
+        if query.is_empty() || !self.config.providers.windows {
             return Vec::new();
         }
         let needle = query.to_lowercase();
@@ -440,7 +449,9 @@ impl App {
 
         // `emoji …` likewise: a page of emoji next to application results
         // would be noise in both directions.
-        if let Some(needle) = keyword_rest(&self.input, EMOJI_KEYWORD) {
+        if self.config.providers.emoji
+            && let Some(needle) = keyword_rest(&self.input, EMOJI_KEYWORD)
+        {
             self.install(emoji_items(needle));
             return;
         }
@@ -461,11 +472,15 @@ impl App {
         }
 
         let mut merged = self.matching_windows(&self.input);
-        merged.append(&mut system::matching(
-            &self.input,
-            self.now_playing.as_deref(),
-        ));
-        merged.append(&mut crate::devices::matching(&self.input, &self.devices));
+        if self.config.providers.system {
+            merged.append(&mut system::matching(
+                &self.input,
+                self.now_playing.as_deref(),
+            ));
+        }
+        if self.config.providers.devices {
+            merged.append(&mut crate::devices::matching(&self.input, &self.devices));
+        }
         merged.append(&mut items);
 
         // One scale for every provider. See `jump_core::rank` — concatenating
@@ -534,7 +549,9 @@ impl App {
 
         // Emoji and quicklinks are answered locally the same way: no fanout,
         // and the service is interrupted rather than racing to fill the list.
-        if let Some(needle) = keyword_rest(&query, EMOJI_KEYWORD) {
+        if self.config.providers.emoji
+            && let Some(needle) = keyword_rest(&query, EMOJI_KEYWORD)
+        {
             if let Some(launcher) = self.launcher.as_ref() {
                 launcher.interrupt();
             }
@@ -735,10 +752,16 @@ impl App {
             Task::perform(system::now_playing(), |track| {
                 cosmic::action::app(Message::NowPlaying(track))
             }),
-            // Same for the device lists the system bus owns.
-            Task::perform(crate::devices::snapshot(), |devices| {
-                cosmic::action::app(Message::Devices(devices))
-            }),
+            // Same for the device lists the system bus owns — skipped
+            // entirely when the provider is off, so a user who does not want
+            // it does not pay two bus round trips per open either.
+            if self.config.providers.devices {
+                Task::perform(crate::devices::snapshot(), |devices| {
+                    cosmic::action::app(Message::Devices(devices))
+                })
+            } else {
+                Task::none()
+            },
         ])
     }
 
