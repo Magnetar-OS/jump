@@ -33,7 +33,7 @@ fit — jump's plugin format is already Alfred's script-filter contract).
 | Capability | Raycast | jump | Plan |
 |---|---|---|---|
 | App search + launch | ✅ | ✅ | Frecency-ranked, activation token, GPU env, systemd scope |
-| Calculator / unit conversion | ✅ | ✅ | Via pop-launcher (qalc). ⬜ verify currency rates work offline-degraded; ⬜ large-type inline answer row |
+| Calculator / unit conversion | ✅ | 🚫 broken upstream | pop-launcher 1.2.7's calc plugin answers `<expr> x = ?` against qalculate 5.12.0 — reproduced by driving the plugin binary directly, while `qalc` itself answers correctly. Needs a decision: rely on a fixed pop-launcher, or call `qalc` from jump and break the no-duplication rule. The large-type answer row waits on that |
 | File search | ✅ | ✅ | Private plocate index, two-phase ranking |
 | Full-text file search | 🔶 | ✅ | FTS5, opt-in, ahead of Raycast here |
 | Clipboard history | ✅ | 🔶 | Text only today. ⬜ images (grid view), ⬜ paste-into-frontmost (needs virtual-keyboard or data-control paste path) |

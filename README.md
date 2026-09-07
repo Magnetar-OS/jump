@@ -14,8 +14,8 @@ Working and dogfoodable on COSMIC 1.5. Verified on a live session:
 
 - Overlay maps on the overlay layer above the panel and fullscreen windows
 - Exclusive keyboard focus, typing, arrow/Ctrl-N/P navigation, Enter, Escape
-- Live results from every pop-launcher plugin (apps, calc, files, recent,
-  terminal, web)
+- Live results from pop-launcher's plugins (apps, files, recent, terminal,
+  web). **Not the calculator** — see Known rough edges
 - Launchpad: full-screen or panel, paginated or continuous
 - Live window switching over `ext-foreign-toplevel-list`, merged into search
 - File search over a private index, with cross-source ranking
@@ -364,6 +364,18 @@ keybind → first frame, resident memory as a daemon, and index build time on a
 reference corpus.
 
 ## Known rough edges
+
+- **The calculator does not work here, and it is not jump's bug.**
+  pop-launcher 1.2.7's `calc` plugin returns the expression back with
+  `x = ?` appended instead of an answer — `= 15*3` answers `15*3 x = ?`,
+  and unit conversions do the same. Driving the plugin binary directly
+  reproduces it, so nothing between jump and the plugin is at fault, and
+  `qalc -t "15*3"` prints `45` on the same machine, so Qalculate is fine
+  too. It looks like a version skew: pop-launcher hands qalculate 5.12.0
+  something it now reads as an equation to solve for `x`. Whether jump
+  should stop relying on that plugin and call `qalc` itself is an open
+  decision — it would contradict the "never duplicate what pop-launcher
+  ships" rule below, which is why it has not simply been done.
 
 - First-run content indexing has not been timed to completion. Priority ordering
   means the useful documents land first, but the full pass is slow.
