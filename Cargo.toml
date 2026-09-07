@@ -63,7 +63,7 @@ switcheroo-control = { git = "https://github.com/pop-os/dbus-settings-bindings" 
 
 # Settings live in cosmic-config; `dirs` is still needed for index and history
 # paths under the XDG data directory.
-dirs = "6.0"
+dirs = "7.0"
 
 # Clipboard history needs wlr-data-control, which delivers selections
 # regardless of focus. libcosmic re-exports wayland-client but not this
