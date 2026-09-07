@@ -34,6 +34,12 @@ pub struct App {
     terminal: bool,
     /// Whether the entry asks for the discrete GPU.
     prefers_dgpu: bool,
+    /// Display names of the entry's desktop actions, in file order.
+    ///
+    /// Kept because pop-launcher's context options carry the action's *group
+    /// id* rather than its `Name=` — see [`crate::actions`] — and the entry
+    /// is the only place the localised name exists.
+    pub actions: Vec<String>,
 }
 
 impl App {
@@ -100,6 +106,11 @@ impl App {
             exec: entry.exec,
             terminal: entry.terminal,
             prefers_dgpu: entry.prefers_dgpu,
+            actions: entry
+                .desktop_actions
+                .into_iter()
+                .map(|action| action.name)
+                .collect(),
         }
     }
 }

@@ -363,8 +363,6 @@ reference corpus.
   means the useful documents land first, but the full pass is slow.
 - In a light theme the accent-tinted selection reads pink; it likely wants a
   different treatment than the dark-theme tint.
-- Desktop *actions* (e.g. VS Code's recent workspaces) render with the action
-  description as the title, which is how pop-launcher returns them.
 - The entrance animation is opacity plus a short rise. There is no scale
   component: iced's `Float` only applies a transform when scaling above 1.0, so
   a 0.96 → 1.0 entrance would silently render unscaled.

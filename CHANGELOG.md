@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The action panel showed a blank clickable row under every application's
+  desktop actions, and labelled those actions with their internal group id
+  (`new-private-window`) instead of their name ("New Incognito Window").
 - Clipboard subtitles said "1 characters"; counts are pluralised by the
   Fluent catalogue now, which also makes them translatable.
 - Window subtitles and clipboard subtitles were hardcoded English; both go

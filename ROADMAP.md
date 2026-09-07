@@ -194,8 +194,14 @@ second dimension of interaction on each row.
       comparison, not by eye once
 - [ ] Light-theme selection treatment: the accent tint that works on dark
       reads pink on light; design it separately rather than sharing the value
-- [ ] Desktop actions render with the action description as the title (as
-      pop-launcher returns them); re-title as "App — Action"
+- [x] Desktop actions in the action panel now show the entry's own localised
+      `Name=` instead of the group id pop-launcher hands back, and the blank
+      option it appends to every application no longer becomes an empty
+      clickable row. Both measured against pop-launcher 1.2.7 by driving it
+      directly: helium declares 2 actions and answers with 3 options named
+      `new-window`, `new-private-window`, ``. Option ids are positional, so
+      the entry's action list resolves them; an ambiguous entry name falls
+      back to making the id readable rather than risking a wrong label.
 - [ ] Reduced-motion: honour the system animation preference by collapsing
       transitions to fades, not by branching every animation site
 - [ ] Screen-reader pass over the result list (libcosmic `a11y` is already

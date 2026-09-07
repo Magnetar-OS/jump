@@ -127,21 +127,47 @@ impl Panel {
     }
 
     /// Append pop-launcher context options as they arrive.
+    ///
+    /// `action_names` are the application's desktop-action display names in
+    /// file order, empty when the entry could not be identified. Two things
+    /// have to be corrected here, both measured against pop-launcher 1.2.7:
+    ///
+    /// * **The last option has an empty name.** Every application queried
+    ///   returned one more option than its entry declares actions, with a
+    ///   blank name — helium declares 2 and answers with 3. Passed through,
+    ///   it becomes a blank clickable row at the bottom of every panel.
+    /// * **The name is the action's group id, not its `Name=`.** Alacritty's
+    ///   one action answers as `New` where the entry says `New Terminal`;
+    ///   helium answers `new-private-window` for `New Incognito Window`.
+    ///   Option ids are positional, so the entry's own list resolves them.
     pub fn extend_with_context(
         &mut self,
         item: Indice,
         options: impl IntoIterator<Item = jump_core::ContextOption>,
+        action_names: &[String],
     ) {
-        self.actions
-            .extend(options.into_iter().map(|option| Action {
-                label: option.name,
-                icon: "view-more-symbolic",
-                shortcut: None,
-                kind: Kind::LauncherContext {
-                    item,
-                    option: option.id,
-                },
-            }));
+        self.actions.extend(
+            options
+                .into_iter()
+                .filter(|option| !option.name.trim().is_empty())
+                .map(|option| Action {
+                    // The entry's localised name when the positional lookup
+                    // lands, else the group id made readable. A wrong label
+                    // would be worse than a plain one, so a lookup that does
+                    // not line up falls back rather than guessing.
+                    label: action_names
+                        .get(option.id as usize)
+                        .filter(|name| !name.is_empty())
+                        .cloned()
+                        .unwrap_or_else(|| humanise_action_id(&option.name)),
+                    icon: "view-more-symbolic",
+                    shortcut: None,
+                    kind: Kind::LauncherContext {
+                        item,
+                        option: option.id,
+                    },
+                }),
+        );
     }
 }
 
@@ -295,6 +321,47 @@ fn actions_for(item: &Item, window: Option<&crate::toplevel::Window>) -> Vec<Act
 
         Source::System { .. } => vec![primary(fl!("action-run"), "system-run-symbolic")],
     }
+}
+
+/// Make a desktop-action group id readable, for when the entry's own
+/// localised name is not available: `new-private-window` becomes "New Private
+/// Window" and `ComposeMessage` becomes "Compose Message".
+///
+/// Not a substitute for the real name — it cannot translate — but an id shown
+/// raw is the defect being fixed, and this at least reads as a label.
+fn humanise_action_id(id: &str) -> String {
+    let mut words: Vec<String> = Vec::new();
+    let mut word = String::new();
+
+    for character in id.chars() {
+        if character == '-' || character == '_' || character.is_whitespace() {
+            if !word.is_empty() {
+                words.push(std::mem::take(&mut word));
+            }
+        } else {
+            // A capital starts a new word only after a lowercase run, so
+            // `ComposeMessage` splits but `URL` stays whole.
+            if character.is_uppercase() && word.chars().last().is_some_and(char::is_lowercase) {
+                words.push(std::mem::take(&mut word));
+            }
+            word.push(character);
+        }
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+
+    words
+        .iter()
+        .map(|word| {
+            let mut characters = word.chars();
+            match characters.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + characters.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The key hint for a plugin modifier, e.g. `ctrl` → "Ctrl ↵".
@@ -531,12 +598,83 @@ mod tests {
                 id: 0,
                 name: "New Window".into(),
             }],
+            &[],
         );
         assert_eq!(panel.actions.len(), 3);
         assert!(matches!(
             panel.actions[2].kind,
             Kind::LauncherContext { item: 7, option: 0 }
         ));
+    }
+
+    #[test]
+    fn context_options_drop_the_blank_row_and_use_real_action_names() {
+        // Exactly what pop-launcher 1.2.7 answers for helium: two real
+        // actions addressed by group id, plus a trailing blank.
+        let mut panel = Panel::for_item(&item(Source::Launcher), false, None).expect("panel");
+        let before = panel.actions.len();
+
+        panel.extend_with_context(
+            3,
+            [
+                jump_core::ContextOption {
+                    id: 0,
+                    name: "new-window".into(),
+                },
+                jump_core::ContextOption {
+                    id: 1,
+                    name: "new-private-window".into(),
+                },
+                jump_core::ContextOption {
+                    id: 2,
+                    name: String::new(),
+                },
+            ],
+            &["New Window".to_owned(), "New Incognito Window".to_owned()],
+        );
+
+        // The blank option never becomes a row.
+        assert_eq!(panel.actions.len(), before + 2);
+        assert_eq!(panel.actions[before].label, "New Window");
+        assert_eq!(panel.actions[before + 1].label, "New Incognito Window");
+        // Activation still addresses the original option ids.
+        assert!(matches!(
+            panel.actions[before + 1].kind,
+            Kind::LauncherContext { item: 3, option: 1 }
+        ));
+    }
+
+    #[test]
+    fn unresolvable_action_ids_are_made_readable_rather_than_shown_raw() {
+        let mut panel = Panel::for_item(&item(Source::Launcher), false, None).expect("panel");
+        let before = panel.actions.len();
+
+        panel.extend_with_context(
+            0,
+            [
+                jump_core::ContextOption {
+                    id: 0,
+                    name: "new-private-window".into(),
+                },
+                jump_core::ContextOption {
+                    id: 1,
+                    name: "ComposeMessage".into(),
+                },
+            ],
+            // No entry matched, so nothing to resolve against.
+            &[],
+        );
+
+        assert_eq!(panel.actions[before].label, "New Private Window");
+        assert_eq!(panel.actions[before + 1].label, "Compose Message");
+    }
+
+    #[test]
+    fn humanising_leaves_acronyms_and_single_words_alone() {
+        assert_eq!(humanise_action_id("New"), "New");
+        assert_eq!(humanise_action_id("OpenURL"), "Open URL");
+        assert_eq!(humanise_action_id("open_address_book"), "Open Address Book");
+        assert_eq!(humanise_action_id(""), "");
     }
 
     #[test]

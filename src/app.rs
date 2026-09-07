@@ -922,6 +922,21 @@ impl App {
         self.dismiss_with(release)
     }
 
+    /// Desktop-action display names for the application `item` refers to, in
+    /// the order pop-launcher addresses them by index.
+    ///
+    /// Empty unless exactly one installed application carries the result's
+    /// title: two entries can share a name — this machine has two "Document
+    /// Viewer"s — and labelling one application's actions with another's
+    /// would be worse than showing the raw ids the fallback humanises.
+    fn action_names_for(&self, item: &Item) -> Vec<String> {
+        let mut matching = self.apps.iter().filter(|app| app.name == item.title);
+        match (matching.next(), matching.next()) {
+            (Some(app), None) => app.actions.clone(),
+            _ => Vec::new(),
+        }
+    }
+
     /// Run action `index` of the open panel.
     fn run_action(&mut self, index: usize) -> Task<Message> {
         let Some(panel) = self.actions.take() else {
@@ -1197,13 +1212,23 @@ impl cosmic::Application for App {
                 jump_core::Event::Context { id, options } => {
                     // Only meaningful while the panel is open on the item that
                     // asked; a stale answer for a different row is dropped.
-                    if let Some(panel) = self.actions.as_mut()
-                        && self
-                            .results
-                            .get(self.selected)
-                            .is_some_and(|item| item.source == Source::Launcher && item.id == id)
-                    {
-                        panel.extend_with_context(id, options);
+                    let addressed = self
+                        .results
+                        .get(self.selected)
+                        .is_some_and(|item| item.source == Source::Launcher && item.id == id);
+                    if !addressed {
+                        return Task::none();
+                    }
+
+                    // Resolved before the panel is borrowed mutably.
+                    let names = self
+                        .results
+                        .get(self.selected)
+                        .map(|item| self.action_names_for(item))
+                        .unwrap_or_default();
+
+                    if let Some(panel) = self.actions.as_mut() {
+                        panel.extend_with_context(id, options, &names);
                     }
                     Task::none()
                 }
