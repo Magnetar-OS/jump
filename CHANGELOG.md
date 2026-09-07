@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The selection highlight was noticeably weaker in a light theme than a dark
+  one; its opacity now follows the theme so both carry the same weight.
+
 - The action panel showed a blank clickable row under every application's
   desktop actions, and labelled those actions with their internal group id
   (`new-private-window`) instead of their name ("New Incognito Window").

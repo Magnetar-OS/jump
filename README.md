@@ -361,8 +361,6 @@ reference corpus.
 
 - First-run content indexing has not been timed to completion. Priority ordering
   means the useful documents land first, but the full pass is slow.
-- In a light theme the accent-tinted selection reads pink; it likely wants a
-  different treatment than the dark-theme tint.
 - The entrance animation is opacity plus a short rise. There is no scale
   component: iced's `Float` only applies a transform when scaling above 1.0, so
   a 0.96 → 1.0 entrance would silently render unscaled.

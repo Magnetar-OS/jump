@@ -192,8 +192,21 @@ second dimension of interaction on each row.
 - [ ] Per-row secondary text alignment pass at 1×/1.25×/2× scale factors —
       pixel-perfect means at every scale factor, verified by screenshot
       comparison, not by eye once
-- [ ] Light-theme selection treatment: the accent tint that works on dark
-      reads pink on light; design it separately rather than sharing the value
+- [x] Light-theme selection treatment — and the premise turned out to be
+      half wrong, so it is worth recording. The selection "reading pink" on
+      light is not a bug: a theme's light and dark accents are unrelated
+      colours, and this machine's light accent simply *is* a crimson
+      (`#B6174B`) where its dark accent is a light blue. Overriding that hue
+      would substitute our taste for the user's setting.
+      What the measurement did expose is the opposite of the complaint: at a
+      shared 0.34 alpha the light selection was the *weaker* of the two —
+      WCAG contrast against the background of 1.71 against dark's 2.12. The
+      alpha is now per mode (0.34 dark, 0.47 light → 2.13), so the highlight
+      carries the same weight in both, and all three selection sites share
+      one helper so the split cannot be applied to two and missed at the
+      third. `list_button.selected` is not usable as a semantic fill: COSMIC
+      ships it fully transparent and tints list selection through
+      `selected_text` instead.
 - [x] Desktop actions in the action panel now show the entry's own localised
       `Name=` instead of the group id pop-launcher hands back, and the blank
       option it appends to every application no longer becomes an empty
