@@ -18,6 +18,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- A "Reduce motion" setting that collapses the entrance, row cascade and
+  page slide to plain fades, applied live.
+
 - Emoji search: `emoji party` lists matching emoji by name and shortcode;
   Enter copies the emoji to the clipboard.
 - Quicklinks: user-defined URL templates with a claiming keyword

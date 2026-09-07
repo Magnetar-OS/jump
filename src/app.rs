@@ -1117,8 +1117,12 @@ impl cosmic::Application for App {
                 plugins.set_keyword_overrides(config.plugin_keywords.iter().cloned());
                 plugins
             },
+            panel: {
+                let mut panel = Panel::new();
+                panel.set_reduced_motion(config.reduce_motion);
+                panel
+            },
             config,
-            panel: Panel::new(),
             dismissing: false,
             scroll_travel: 0.0,
             blur_settled: false,
@@ -1349,6 +1353,7 @@ impl cosmic::Application for App {
                     .set_disabled(config.disabled_plugins.iter().cloned());
                 self.plugins
                     .set_keyword_overrides(config.plugin_keywords.iter().cloned());
+                self.panel.set_reduced_motion(config.reduce_motion);
                 self.config = config;
                 tracing::info!(files_changed, "settings updated");
                 self.refresh_blur()

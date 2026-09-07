@@ -66,6 +66,7 @@ struct App {
 #[derive(Debug, Clone)]
 enum Message {
     Blur(bool),
+    ReduceMotion(bool),
     Opacity(f32),
     BackdropOpacity(f32),
     Layout(usize),
@@ -147,6 +148,7 @@ impl cosmic::Application for App {
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
         match message {
             Message::Blur(value) => self.config.blur = value,
+            Message::ReduceMotion(value) => self.config.reduce_motion = value,
             Message::Opacity(value) => self.config.opacity = value,
             Message::BackdropOpacity(value) => self.config.fullscreen_opacity = value,
             Message::CellSize(value) => self.config.cell_size = value,
@@ -208,6 +210,10 @@ impl cosmic::Application for App {
             .add(settings::item(
                 fl!("background-blur"),
                 widget::toggler(self.config.blur).on_toggle(Message::Blur),
+            ))
+            .add(settings::item(
+                fl!("reduce-motion"),
+                widget::toggler(self.config.reduce_motion).on_toggle(Message::ReduceMotion),
             ))
             .add(settings::item(
                 fl!("panel-opacity"),

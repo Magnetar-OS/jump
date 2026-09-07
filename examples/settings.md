@@ -27,6 +27,7 @@ so a bad value can never stop the launcher from opening.
 |---|---|---|---|
 | `scroll` | `continuous` \| `page-horizontal` \| `page-vertical` | `page-horizontal` | Launchpad paging |
 | `blur` | bool | `true` | Compositor backdrop blur |
+| `reduce_motion` | bool | `false` | Collapse the entrance, row cascade and page slide to plain fades |
 | `opacity` | float | `0.42` | Search panel fill; lower shows more desktop |
 | `fullscreen_opacity` | float | `0.48` | Launchpad backdrop fill |
 | `grid_layout` | `fullscreen` \| `panel` | `fullscreen` | Launchpad layout |

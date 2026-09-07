@@ -60,6 +60,20 @@ const PAGE_DURATION: Duration = Duration::from_millis(260);
 
 /// Drives the panel's open/close transition.
 pub struct Panel {
+    /// Collapse motion to plain fades.
+    ///
+    /// Movement is what makes an interface unusable for people sensitive to
+    /// it, not opacity — so this zeroes the rises, the page slide and the row
+    /// stagger while leaving the fades, rather than snapping everything on.
+    /// Held here, and consulted by the accessors below, so that no drawing
+    /// site has to know about it: the alternative is a branch at every call
+    /// and one of them eventually being missed.
+    ///
+    /// COSMIC 1.5 exposes no reduced-motion preference — checked across
+    /// cosmic-config's stores and libcosmic — so this is jump's own setting
+    /// for now, and the one place to read a desktop-wide key from when one
+    /// arrives.
+    reduced: bool,
     /// Target state: `true` open, `false` closed.
     ///
     /// `bool` rather than `f32` because iced only exposes `interpolate` on the
@@ -87,10 +101,16 @@ impl Panel {
             progress: Animation::new(false)
                 .easing(Easing::EaseOutExpo)
                 .duration(OPEN_DURATION),
+            reduced: false,
             results_changed: Instant::now(),
             page_changed: Instant::now() - PAGE_DURATION,
             page_forward: true,
         }
+    }
+
+    /// Collapse motion to fades, or restore it. Applied live from settings.
+    pub fn set_reduced_motion(&mut self, reduced: bool) {
+        self.reduced = reduced;
     }
 
     /// Begin opening. Safe to call while closing — the transition reverses.
@@ -124,6 +144,11 @@ impl Panel {
     /// page enters from exactly one screen away rather than a fixed nudge.
     #[must_use]
     pub fn page_offset(&self, now: Instant, distance: f32) -> f32 {
+        if self.reduced {
+            // A whole screen of icons travelling is the most motion the
+            // launcher produces; with motion reduced the page simply swaps.
+            return 0.0;
+        }
         let elapsed = now.saturating_duration_since(self.page_changed);
         if elapsed >= PAGE_DURATION {
             return 0.0;
@@ -139,7 +164,7 @@ impl Panel {
     /// Whether the page slide is still running.
     #[must_use]
     pub fn page_animating(&self, now: Instant) -> bool {
-        now.saturating_duration_since(self.page_changed) < PAGE_DURATION
+        !self.reduced && now.saturating_duration_since(self.page_changed) < PAGE_DURATION
     }
 
     /// Note that the result list changed, restarting the row cascade.
@@ -162,7 +187,12 @@ impl Panel {
         }
         // The cascade runs on its own clock, so it has to be checked separately.
         let elapsed = now.saturating_duration_since(self.results_changed);
-        elapsed < ROW_DURATION + ROW_STAGGER * u32::try_from(rows).unwrap_or(u32::MAX)
+        let stagger = if self.reduced {
+            Duration::ZERO
+        } else {
+            ROW_STAGGER
+        };
+        elapsed < ROW_DURATION + stagger * u32::try_from(rows).unwrap_or(u32::MAX)
     }
 
     /// Panel opacity in 0.0..=1.0.
@@ -174,6 +204,9 @@ impl Panel {
     /// Vertical offset in logical pixels; positive moves the panel down.
     #[must_use]
     pub fn offset_y(&self, now: Instant) -> f32 {
+        if self.reduced {
+            return 0.0;
+        }
         self.progress.interpolate(RISE, 0.0, now)
     }
 
@@ -191,23 +224,63 @@ impl Panel {
     #[must_use]
     pub fn row(&self, now: Instant, index: usize) -> (f32, f32) {
         let elapsed = now.saturating_duration_since(self.results_changed);
-        let delay = ROW_STAGGER * u32::try_from(index).unwrap_or(u32::MAX);
+        // No stagger and no travel with motion reduced: every row fades
+        // together, in place.
+        let (stagger, rise) = if self.reduced {
+            (Duration::ZERO, 0.0)
+        } else {
+            (ROW_STAGGER, ROW_RISE)
+        };
+        let delay = stagger * u32::try_from(index).unwrap_or(u32::MAX);
 
         let Some(active) = elapsed.checked_sub(delay) else {
             // Not started yet: fully transparent and displaced.
-            return (0.0, ROW_RISE);
+            return (0.0, rise);
         };
 
         let linear = (active.as_secs_f32() / ROW_DURATION.as_secs_f32()).clamp(0.0, 1.0);
         let eased = Easing::EaseOutCubic.value(linear);
 
-        (eased, ROW_RISE * (1.0 - eased))
+        (eased, rise * (1.0 - eased))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reduced_motion_removes_travel_but_keeps_the_fade() {
+        let mut panel = Panel::new();
+        let start = Instant::now();
+        panel.set_reduced_motion(true);
+        panel.results_changed(start);
+        panel.open(start);
+
+        // Rows fade together rather than cascading, and none of them travel.
+        let mid = start + ROW_DURATION / 2;
+        let (first_opacity, first_offset) = panel.row(mid, 0);
+        let (tenth_opacity, tenth_offset) = panel.row(mid, 9);
+        assert!(first_opacity > 0.0 && first_opacity < 1.0, "still a fade");
+        assert!(
+            (first_opacity - tenth_opacity).abs() < f32::EPSILON,
+            "no stagger"
+        );
+        assert_eq!(first_offset, 0.0);
+        assert_eq!(tenth_offset, 0.0);
+
+        // The panel itself does not rise, and a page swap is instant.
+        assert_eq!(panel.offset_y(mid), 0.0);
+        panel.page_changed(start, true);
+        assert_eq!(panel.page_offset(mid, 1920.0), 0.0);
+        assert!(!panel.page_animating(mid));
+
+        // Turning it back on restores the cascade.
+        panel.set_reduced_motion(false);
+        let (first, _) = panel.row(mid, 0);
+        let (tenth, _) = panel.row(mid, 9);
+        assert!(first > tenth, "rows cascade again");
+    }
 
     #[test]
     fn rows_cascade_in_order() {

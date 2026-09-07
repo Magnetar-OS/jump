@@ -149,6 +149,12 @@ impl FileConfig {
 pub struct Config {
     /// Paging behaviour of the Launchpad grid.
     pub scroll: ScrollMode,
+    /// Collapse the entrance, row cascade and page slide to plain fades.
+    ///
+    /// jump's own setting rather than a desktop-wide one: COSMIC 1.5 exposes
+    /// no reduced-motion preference. When it does, this becomes the fallback
+    /// for it rather than the only source.
+    pub reduce_motion: bool,
     /// Ask the compositor to blur the backdrop behind the surface.
     ///
     /// Turning this off leaves the surface merely translucent, which shows the
@@ -194,6 +200,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             scroll: ScrollMode::default(),
+            reduce_motion: false,
             blur: true,
             opacity: 0.42,
             fullscreen_opacity: 0.48,

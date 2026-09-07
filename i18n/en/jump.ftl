@@ -142,3 +142,6 @@ clipboard-lines-chars = Clipboard — { $lines ->
         [one] { $chars } character
        *[other] { $chars } characters
     }
+
+## Motion
+reduce-motion = Reduce motion

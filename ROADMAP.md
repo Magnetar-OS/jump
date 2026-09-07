@@ -202,8 +202,16 @@ second dimension of interaction on each row.
       `new-window`, `new-private-window`, ``. Option ids are positional, so
       the entry's action list resolves them; an ambiguous entry name falls
       back to making the id readable rather than risking a wrong label.
-- [ ] Reduced-motion: honour the system animation preference by collapsing
-      transitions to fades, not by branching every animation site
+- [x] Reduced motion, implemented centrally in `anim.rs` rather than by
+      branching every drawing site: one flag zeroes the panel rise, the row
+      stagger, the row travel and the page slide while leaving the fades —
+      movement is what makes an interface unusable for people sensitive to
+      it, not opacity.
+      **There is no system preference to honour.** COSMIC 1.5 exposes no
+      reduced-motion key — checked across the cosmic-config stores and
+      libcosmic — so this is jump's own `reduce_motion` setting, and
+      `Panel::set_reduced_motion` is the single place to read a desktop-wide
+      key from if one ever ships.
 - [ ] Screen-reader pass over the result list (libcosmic `a11y` is already
       enabled; verify rows announce title + subtitle + position)
 - [ ] Entrance scale component when upstream allows it: iced's `Float` only
