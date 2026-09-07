@@ -14,8 +14,9 @@ Working and dogfoodable on COSMIC 1.5. Verified on a live session:
 
 - Overlay maps on the overlay layer above the panel and fullscreen windows
 - Exclusive keyboard focus, typing, arrow/Ctrl-N/P navigation, Enter, Escape
-- Live results from pop-launcher's plugins (apps, files, recent, terminal,
-  web). **Not the calculator** — see Known rough edges
+- Live results from pop-launcher's plugins (apps, files, recent, terminal, web)
+- Calculator and unit conversion behind `=`, answered by Qalculate directly
+  rather than through pop-launcher — see below
 - Launchpad: full-screen or panel, paginated or continuous
 - Live window switching over `ext-foreign-toplevel-list`, merged into search
 - File search over a private index, with cross-source ranking
@@ -97,6 +98,27 @@ Package-manager caches are excluded from both indexes. On this machine they
 contributed the majority of 41,412 content candidates and a 111 MB index made
 entirely of other people's source code — excluding them cut the path index build
 from 8.0 s to 2.1 s and was the single largest quality win available.
+
+## Calculator
+
+`= 15*3` answers `45`; `= 5 km to miles` converts. The answer is set in large
+type — it is the result, not a label for one — and Enter copies it.
+
+This is the one place jump deliberately duplicates something pop-launcher
+ships, against the rule stated below, because pop-launcher's version does not
+work. On pop-launcher 1.2.7 with Qalculate 5.12.0 its `calc` plugin answers
+the input back with `x = ?` appended: `= 15*3` gives `15*3 x = ?`, and unit
+conversions do the same. Driving the plugin binary directly reproduces it, so
+nothing between jump and the plugin is at fault, and `qalc -t "15*3"` prints
+`45` on the same machine, so Qalculate is fine too — it is a version skew
+inside that plugin.
+
+Rather than pattern-match another program's broken output, jump asks `qalc`
+directly, with Qalculate's own `-m` budget bounding the work and `-exrates`
+deliberately not passed, because a keystroke should not fetch currency rates
+over the network. Requires `qalc`; without it the provider simply does not
+appear. Turn it off under **Search providers** if you would rather wait for
+pop-launcher.
 
 ## Clipboard
 
@@ -365,17 +387,6 @@ reference corpus.
 
 ## Known rough edges
 
-- **The calculator does not work here, and it is not jump's bug.**
-  pop-launcher 1.2.7's `calc` plugin returns the expression back with
-  `x = ?` appended instead of an answer — `= 15*3` answers `15*3 x = ?`,
-  and unit conversions do the same. Driving the plugin binary directly
-  reproduces it, so nothing between jump and the plugin is at fault, and
-  `qalc -t "15*3"` prints `45` on the same machine, so Qalculate is fine
-  too. It looks like a version skew: pop-launcher hands qalculate 5.12.0
-  something it now reads as an equation to solve for `x`. Whether jump
-  should stop relying on that plugin and call `qalc` itself is an open
-  decision — it would contradict the "never duplicate what pop-launcher
-  ships" rule below, which is why it has not simply been done.
 
 - First-run content indexing has not been timed to completion. Priority ordering
   means the useful documents land first, but the full pass is slow.

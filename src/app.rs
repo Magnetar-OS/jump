@@ -108,6 +108,12 @@ pub enum Message {
     Windows(Vec<Window>),
     /// The current MPRIS track, fetched when the overlay opens.
     NowPlaying(Option<String>),
+    /// A calculator answer for `query`, which may already be stale. `None`
+    /// when qalc could not evaluate the expression.
+    CalcResult {
+        query: String,
+        answer: Option<String>,
+    },
     /// Bluetooth devices and Wi-Fi networks, snapshotted when the overlay
     /// opens — see [`crate::devices`] for why it is a snapshot.
     Devices(Vec<crate::devices::Device>),
@@ -547,6 +553,29 @@ impl App {
             return self.refresh_blur();
         }
 
+        // `= …` claims the query and is answered by a subprocess, so unlike
+        // the other claims it cannot be resolved here; the row arrives with
+        // `CalcResult`. The service is still interrupted immediately so the
+        // list does not fill with applications in the meantime.
+        if self.config.providers.calculator
+            && let Some(expression) = jump_core::calc::claims(&query)
+        {
+            if let Some(launcher) = self.launcher.as_ref() {
+                launcher.interrupt();
+            }
+            let expression = expression.to_owned();
+            let claimed = query.clone();
+            // Nothing stale should sit under a `=` query while qalc answers.
+            self.install(Vec::new());
+            return Task::perform(
+                async move {
+                    let answer = jump_core::calc::evaluate(&expression).await;
+                    (claimed, answer)
+                },
+                |(query, answer)| cosmic::action::app(Message::CalcResult { query, answer }),
+            );
+        }
+
         // Emoji and quicklinks are answered locally the same way: no fanout,
         // and the service is interrupted rather than racing to fill the list.
         if self.config.providers.emoji
@@ -916,6 +945,13 @@ impl App {
             }
             Source::Url { url } => {
                 jump_core::web::open(url);
+            }
+            Source::Calc { answer } => {
+                // The answer is already on screen; what is left to do with it
+                // is take it somewhere else.
+                if let Some(clipboard) = self.clipboard.as_ref() {
+                    clipboard.copy(answer);
+                }
             }
             Source::System { id } => match system::run(id) {
                 Some(system::Outcome::Launch(launch)) => {
@@ -1437,6 +1473,16 @@ impl cosmic::Application for App {
                 Task::none()
             }
 
+            Message::CalcResult { query, answer } => {
+                // Same staleness rule as every other provider.
+                if query != self.input {
+                    return Task::none();
+                }
+                let items = answer.map(calc_item).into_iter().collect();
+                self.install(items);
+                self.refresh_blur()
+            }
+
             Message::NowPlaying(track) => {
                 let changed = track != self.now_playing;
                 self.now_playing = track;
@@ -1936,6 +1982,25 @@ const EMOJI_KEYWORD: &str = "emoji";
 /// Most emoji shown for one query. Twelve list rows is the panel's budget; a
 /// denser grid presentation is the planned home for the rest.
 const EMOJI_LIMIT: usize = 12;
+
+/// The single row a calculator answer produces.
+///
+/// The answer is the title because the view renders that row in large type —
+/// the number is the result, not a label for it.
+fn calc_item(answer: String) -> Item {
+    Item {
+        key: jump_core::ItemKey("calc".to_owned()),
+        id: 0,
+        title: answer.clone(),
+        subtitle: fl!("calc-copy-subtitle"),
+        icon: Some(jump_core::Icon::Name("accessories-calculator".to_owned())),
+        category_icon: None,
+        window: None,
+        source: Source::Calc { answer },
+        autocomplete: None,
+        score: 1.0,
+    }
+}
 
 /// Emoji rows for an `emoji …` query. The glyph rides in the title — emoji
 /// have no icon-theme icons, and the text renderer already draws them.

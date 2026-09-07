@@ -33,7 +33,7 @@ fit — jump's plugin format is already Alfred's script-filter contract).
 | Capability | Raycast | jump | Plan |
 |---|---|---|---|
 | App search + launch | ✅ | ✅ | Frecency-ranked, activation token, GPU env, systemd scope |
-| Calculator / unit conversion | ✅ | 🚫 broken upstream | pop-launcher 1.2.7's calc plugin answers `<expr> x = ?` against qalculate 5.12.0 — reproduced by driving the plugin binary directly, while `qalc` itself answers correctly. Needs a decision: rely on a fixed pop-launcher, or call `qalc` from jump and break the no-duplication rule. The large-type answer row waits on that |
+| Calculator / unit conversion | ✅ | ✅ | jump calls `qalc` itself behind `=`, with the answer in large type and Enter to copy. It does not use pop-launcher's calc plugin, which answers `<expr> x = ?` for every input against qalculate 5.12.0 |
 | File search | ✅ | ✅ | Private plocate index, two-phase ranking |
 | Full-text file search | 🔶 | ✅ | FTS5, opt-in, ahead of Raycast here |
 | Clipboard history | ✅ | 🔶 | Text only today. ⬜ images (grid view), ⬜ paste-into-frontmost (needs virtual-keyboard or data-control paste path) |
@@ -190,7 +190,10 @@ second dimension of interaction on each row.
       says "Enter", an alternate says "Ctrl ↵".
       ⬜ paste-into-frontmost for clipboard entries (needs the virtual-keyboard
       path, now known to be available).
-- [ ] Inline detail for calculator/conversion results (large-type answer row)
+- [x] Inline detail for calculator results: the answer is the row's title and
+      set in `title3` rather than body, because the number *is* the result and
+      not a label for one. One text style rather than a second row layout, so
+      selection, the cascade and the icon behave identically.
 - [ ] Grid view for visual results (emoji, clipboard images) reusing the
       Launchpad grid machinery
 - [ ] Per-row secondary text alignment pass at 1×/1.25×/2× scale factors —

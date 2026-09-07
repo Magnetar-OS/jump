@@ -85,6 +85,7 @@ fn source_kind(source: &Source) -> u8 {
         Source::System { .. } => 5,
         Source::Process { .. } => 6,
         Source::Url { .. } => 7,
+        Source::Calc { .. } => 8,
     }
 }
 
@@ -127,6 +128,10 @@ fn base_score(item: &Item, tokens: &[String]) -> f32 {
         // is claimed and this scale is not consulted; a value keeps the match
         // exhaustive and honest if that ever changes.
         Source::Process { .. } => 1.0,
+
+        // Only ever produced behind the `=` prefix, which claims the query
+        // outright, so this scale is not consulted.
+        Source::Calc { .. } => 1.0,
 
         // Quicklinks claim the query outright and fallbacks are appended
         // below the merged list, so this scale is normally not consulted;

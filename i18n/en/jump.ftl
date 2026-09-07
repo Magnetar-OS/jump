@@ -154,3 +154,7 @@ provider-devices = Bluetooth and Wi-Fi
 provider-clipboard = Clipboard history (clip)
 provider-emoji = Emoji (emoji)
 provider-web = Quicklinks and web searches
+provider-calculator = Calculator (=)
+
+## Calculator
+calc-copy-subtitle = Copy the answer

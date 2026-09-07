@@ -181,6 +181,15 @@ fn actions_for(item: &Item, window: Option<&crate::toplevel::Window>) -> Vec<Act
     };
 
     match &item.source {
+        // The answer is already on screen in large type, so the only thing
+        // left to do with it is take it elsewhere.
+        Source::Calc { answer } => vec![Action {
+            label: fl!("action-copy"),
+            icon: "edit-copy-symbolic",
+            shortcut: Some(fl!("key-enter")),
+            kind: Kind::CopyText(answer.clone()),
+        }],
+
         Source::File { path } => {
             let mut actions = vec![primary(fl!("action-open"), "document-open-symbolic")];
 

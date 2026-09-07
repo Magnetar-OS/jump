@@ -29,6 +29,7 @@
 //! # }
 //! ```
 
+pub mod calc;
 pub mod content;
 pub mod emoji;
 pub mod files;

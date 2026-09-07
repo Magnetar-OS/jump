@@ -102,6 +102,7 @@ enum Provider {
     Clipboard,
     Emoji,
     Web,
+    Calculator,
 }
 
 /// Labels for the layout dropdown, in the order the variants are offered.
@@ -175,6 +176,7 @@ impl cosmic::Application for App {
                     Provider::Clipboard => providers.clipboard = value,
                     Provider::Emoji => providers.emoji = value,
                     Provider::Web => providers.web = value,
+                    Provider::Calculator => providers.calculator = value,
                 }
             }
             Message::Opacity(value) => self.config.opacity = value,
@@ -407,6 +409,11 @@ impl cosmic::Application for App {
                 Provider::Web,
                 fl!("provider-web"),
                 self.config.providers.web,
+            ),
+            (
+                Provider::Calculator,
+                fl!("provider-calculator"),
+                self.config.providers.calculator,
             ),
         ]
         .into_iter()

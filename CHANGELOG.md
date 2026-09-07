@@ -21,6 +21,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Calculator and unit conversion behind `=`, answered by Qalculate directly:
+  `= 15*3` gives `45`, `= 5 km to miles` converts. The answer is shown in
+  large type and Enter copies it. pop-launcher's own calc plugin is not used
+  because it answers `<expr> x = ?` for every input against Qalculate 5.12.
+
 - `jump plugin import` converts Alfred workflows (`.alfredworkflow` bundles
   or extracted directories) into jump plugins — script filters map one to
   one, with unconvertible pieces reported as warnings.

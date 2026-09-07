@@ -25,7 +25,7 @@ use cosmic::iced::widget::{keyed_column, pin};
 use cosmic::iced::{Alignment, Background, Color, Length, Size};
 use cosmic::widget::{column, container, icon, mouse_area, row, scrollable, text, text_input};
 use cosmic::{Apply, Element};
-use jump_core::{Icon, Item};
+use jump_core::{Icon, Item, Source};
 
 use crate::actions;
 use crate::anim::Panel;
@@ -739,14 +739,28 @@ fn result_row<'a>(
         None => fallback_icon(),
     };
 
+    // A calculator answer is the result rather than a label for one, so it is
+    // set in large type: the number is what the eye should land on, and at
+    // body size it reads as just another row. Everything else about the row
+    // — icon, subtitle, selection, cascade — stays identical, so this is one
+    // text style rather than a second row layout.
+    let title: Element<'a, Message> = if matches!(item.source, Source::Calc { .. }) {
+        text::title3(item.title.as_str())
+            .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
+            .class(cosmic::theme::Text::Color(alpha_text(alpha, true)))
+            .into()
+    } else {
+        text::body(item.title.as_str())
+            .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
+            .class(cosmic::theme::Text::Color(alpha_text(alpha, true)))
+            .into()
+    };
+
     // Titles come from desktop entries and subtitles from file paths, so both
     // are arbitrarily long while the row's height is fixed. Without an explicit
     // limit a long one wraps, and the extra lines are drawn outside the row.
     let label = column::with_children(vec![
-        text::body(item.title.as_str())
-            .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
-            .class(cosmic::theme::Text::Color(alpha_text(alpha, true)))
-            .into(),
+        title,
         text::caption(item.subtitle.as_str())
             .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
             .class(cosmic::theme::Text::Color(alpha_text(alpha, false)))

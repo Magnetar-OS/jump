@@ -55,6 +55,7 @@ or not the launcher is open.
     clipboard: true,
     emoji: true,
     web: true,
+    calculator: true,
 )
 ```
 

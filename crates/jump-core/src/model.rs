@@ -78,6 +78,12 @@ pub enum Source {
         /// Process id, valid only for the listing that produced it.
         pid: u32,
     },
+    /// A calculator answer. Activating it copies the value, which is what
+    /// the result is for — the answer is already on screen.
+    Calc {
+        /// The value as Qalculate rendered it.
+        answer: String,
+    },
     /// A web link — a quicklink or a fallback search; activating it opens the
     /// URL with the user's default handler.
     Url {

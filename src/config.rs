@@ -163,6 +163,8 @@ pub struct Providers {
     pub emoji: bool,
     /// Quicklinks and the fallback web searches.
     pub web: bool,
+    /// Calculator and unit conversion behind the `=` prefix.
+    pub calculator: bool,
 }
 
 impl Default for Providers {
@@ -174,6 +176,7 @@ impl Default for Providers {
             clipboard: true,
             emoji: true,
             web: true,
+            calculator: true,
         }
     }
 }
