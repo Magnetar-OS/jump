@@ -4,6 +4,7 @@
 //! `jump` — a Spotlight-class launcher for COSMIC.
 
 mod actions;
+mod alfred;
 mod anim;
 mod app;
 mod apps;
@@ -78,7 +79,11 @@ fn main() -> cosmic::iced::Result {
     cosmic::app::run_single_instance::<app::App>(settings, flags)
 }
 
-/// `jump plugin new <name>` and `jump plugin lint <dir-or-name> [query]`.
+/// `jump plugin new <name>`, `jump plugin lint <dir-or-name> [query]`, and
+/// `jump plugin import <workflow>`.
+// One match arm per subcommand; splitting the dispatcher would only scatter
+// it. The same allowance every COSMIC `update` loop makes.
+#[allow(clippy::too_many_lines)]
 fn plugin_cli(arguments: &[String]) -> ! {
     let user_plugins = || {
         dirs::data_dir()
@@ -149,8 +154,47 @@ fn plugin_cli(arguments: &[String]) -> ! {
             }
         },
 
+        Some("import") => match arguments.get(1) {
+            Some(workflow) => {
+                match alfred::import(std::path::Path::new(workflow), &user_plugins()) {
+                    Ok(import) => {
+                        for plugin in &import.plugins {
+                            match &plugin.keyword {
+                                Some(keyword) => println!(
+                                    "Imported “{}” → {} (keyword: {keyword})",
+                                    plugin.name,
+                                    plugin.directory.display(),
+                                ),
+                                None => println!(
+                                    "Imported “{}” → {} (no keyword — runs on every query)",
+                                    plugin.name,
+                                    plugin.directory.display(),
+                                ),
+                            }
+                            println!("Check it: jump plugin lint {}", plugin.directory.display());
+                        }
+                        for warning in &import.warnings {
+                            println!("warning: {warning}");
+                        }
+                        0
+                    }
+                    Err(error) => {
+                        eprintln!("error: {error}");
+                        1
+                    }
+                }
+            }
+            None => {
+                eprintln!("usage: jump plugin import <workflow.alfredworkflow | directory>");
+                2
+            }
+        },
+
         _ => {
-            eprintln!("usage: jump plugin new <name> | jump plugin lint <dir-or-name> [query]");
+            eprintln!(
+                "usage: jump plugin new <name> | jump plugin lint <dir-or-name> [query] | \
+                 jump plugin import <workflow>"
+            );
             2
         }
     };

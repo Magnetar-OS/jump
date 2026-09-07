@@ -47,6 +47,15 @@ jump-core = { path = "crates/jump-core" }
 # The applet activates the launcher over D-Bus rather than spawning a process.
 zbus = { version = "5.19", default-features = false, features = ["tokio"] }
 
+# Alfred workflow import (`jump plugin import`): the bundle's info.plist is an
+# Apple property list. Tooling-only, which is why this lives in the binary
+# crate — the MPL engine stays dependency-light for the future GTK frontend.
+plist = "1.10.1"
+thiserror = "2"
+# Private 0700 extraction dir with an unpredictable name; a predictable path
+# in shared /tmp is a symlink target.
+tempfile = "3.27.0"
+
 # Discrete-GPU environment for desktop entries marked PrefersNonDefaultGPU.
 # The variables differ per vendor, so they have to be asked for rather than
 # hardcoded; this is the same source cosmic-app-library and cosmic-launcher use.
@@ -103,6 +112,11 @@ features = [
     # tokio drives the pop-launcher bridge, so the runtime must be shared.
     "tokio",
 ]
+
+[dev-dependencies]
+# The import test parses the generated manifest with the same parser the
+# engine uses.
+toml = "1.1"
 
 [profile.release]
 # The launcher is judged on the first frame after the keybind fires. Optimise
