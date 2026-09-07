@@ -265,6 +265,12 @@ directory, and `jump plugin lint <dir-or-name> [sample-query]` checks the
 manifest, the commands it names, and one sample query's output against the
 schema — by running it, under the same deadline the launcher uses.
 
+Coming from Alfred: `jump plugin import MyWorkflow.alfredworkflow` converts
+each script filter into a plugin; the item JSON already speaks jump's schema,
+so most workflows run unchanged. A bundle from the internet is treated as
+hostile input — keywords cannot escape the plugin directory and a URL or
+snippet never reaches a shell as code.
+
 ## Layout
 
 ```

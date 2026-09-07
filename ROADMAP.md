@@ -48,7 +48,7 @@ fit — jump's plugin format is already Alfred's script-filter contract).
 | Process search + kill | ✅ | ✅ | `kill …` claims the query; SIGTERM on Enter, Force Kill in the action panel |
 | Bluetooth / Wi-Fi control | ✅ | ✅ | Paired bluez devices connect/disconnect; saved NetworkManager Wi-Fi networks connect/disconnect, matched by name or by "bluetooth"/"wifi" |
 | Action panel (⌘K) | ✅ | ✅ | Ctrl+K, keyboard-first, plugin `mods` as entries, per-action key hints shown |
-| Extensions / plugin API | ✅ | ✅ | Script-filter contract + pop-launcher plugins. ⬜ devex tooling below |
+| Extensions / plugin API | ✅ | ✅ | Script-filter contract + pop-launcher plugins; `jump plugin new` / `lint` / `import` (Alfred workflows) |
 | Extension store | ✅ | 🚫→✅ | No store service by design. System-wide plugin dir (`/usr/share/jump/plugins`) for distro packages, plus a reviewed list in [`docs/plugins.md`](docs/plugins.md) |
 | Per-command aliases & hotkeys | ✅ | ✅ | CLI deep links (`jump show clip` bound to a COSMIC custom shortcut) + a keyword field per plugin in Settings |
 | Favorites / pinned results | ✅ | ✅ | Pin on Top in the action panel; pinned matches rank above everything |
@@ -98,7 +98,11 @@ keep working through the service alongside it.
       — the store without a store service: a reviewed list, install
       instructions, and an explicit statement of the trust model, since a
       plugin runs as the user and nothing sandboxes it.
-- [ ] Import: Alfred workflow converter — script filters map nearly 1:1.
+- [x] Import: Alfred workflows via `jump plugin import <bundle|dir>` — one
+      plugin per script filter, `{query}` rewritten to argv, Open URL / Run
+      Script / Copy to Clipboard actions carried over, everything else
+      warned rather than silently dropped. Hardened against hostile bundles
+      (path traversal, shell injection, tmp symlinks), each pinned by a test.
 
 ## Pillar 2 — Deep integration
 

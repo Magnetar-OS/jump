@@ -21,6 +21,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `jump plugin import` converts Alfred workflows (`.alfredworkflow` bundles
+  or extracted directories) into jump plugins — script filters map one to
+  one, with unconvertible pieces reported as warnings.
 - A Search providers section in Settings: open windows, system commands,
   Bluetooth/Wi-Fi, clipboard, emoji and web results each toggle off.
 - A "Reduce motion" setting that collapses the entrance, row cascade and
