@@ -767,11 +767,22 @@ fn result_row<'a>(
     alpha: f32,
     offset: f32,
 ) -> Element<'a, Message> {
-    let leading: Element<'a, Message> = match handle {
-        Some(handle) => icon::icon(handle.clone()).size(ICON_SIZE).into(),
-        // Only reachable if the handle list and the result list disagree, which
-        // would be a bug rather than a state to render specially.
-        None => fallback_icon(),
+    let leading: Element<'a, Message> = match &item.source {
+        // An emoji has no icon-theme icon, and falling through to the generic
+        // placeholder put a meaningless gear beside every one of them. The
+        // character is drawn at icon size instead, which is also what makes
+        // the row read as a picker rather than as a list of names.
+        Source::Emoji { emoji } => text::title2(emoji.as_str())
+            .apply(container)
+            .width(Length::Fixed(f32::from(ICON_SIZE)))
+            .align_x(Alignment::Center)
+            .into(),
+        _ => match handle {
+            Some(handle) => icon::icon(handle.clone()).size(ICON_SIZE).into(),
+            // Only reachable if the handle list and the result list disagree,
+            // which would be a bug rather than a state to render specially.
+            None => fallback_icon(),
+        },
     };
 
     // A calculator answer is the result rather than a label for one, so it is

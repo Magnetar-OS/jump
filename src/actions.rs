@@ -195,6 +195,13 @@ fn actions_for(item: &Item, window: Option<&crate::toplevel::Window>) -> Vec<Act
     };
 
     match &item.source {
+        Source::Emoji { emoji } => vec![Action {
+            label: fl!("action-copy"),
+            icon: "edit-copy-symbolic",
+            shortcut: Some(fl!("key-enter")),
+            kind: Kind::CopyText(emoji.clone()),
+        }],
+
         // The answer is already on screen in large type, so the only thing
         // left to do with it is take it elsewhere.
         Source::Calc { answer } => vec![Action {

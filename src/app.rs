@@ -946,6 +946,11 @@ impl App {
             Source::Url { url } => {
                 jump_core::web::open(url);
             }
+            Source::Emoji { emoji } => {
+                if let Some(clipboard) = self.clipboard.as_ref() {
+                    clipboard.copy(emoji);
+                }
+            }
             Source::Calc { answer } => {
                 // The answer is already on screen; what is left to do with it
                 // is take it somewhere else.
@@ -2041,7 +2046,8 @@ fn emoji_items(needle: &str) -> Vec<Item> {
         .map(|matched| Item {
             key: jump_core::ItemKey(format!("emoji:{}", matched.emoji)),
             id: 0,
-            title: format!("{}  {}", matched.emoji, matched.name),
+            // The glyph is the icon, not a prefix on the name.
+            title: matched.name.to_owned(),
             subtitle: matched.shortcode.map_or_else(
                 || fl!("emoji-copy-subtitle"),
                 |code| format!(":{code}: — {}", fl!("emoji-copy-subtitle")),
@@ -2049,10 +2055,8 @@ fn emoji_items(needle: &str) -> Vec<Item> {
             icon: None,
             category_icon: None,
             window: None,
-            // Copying is exactly what activating a clipboard entry does, so
-            // emoji reuse that source rather than growing a parallel one.
-            source: Source::Clipboard {
-                text: matched.emoji.to_owned(),
+            source: Source::Emoji {
+                emoji: matched.emoji.to_owned(),
             },
             autocomplete: None,
             score: 1.0,

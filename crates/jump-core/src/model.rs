@@ -78,6 +78,16 @@ pub enum Source {
         /// Process id, valid only for the listing that produced it.
         pid: u32,
     },
+    /// An emoji. Activating it copies the character.
+    ///
+    /// Distinct from [`Source::Clipboard`] even though both copy, because
+    /// the row is drawn differently: the glyph *is* the icon, and reusing
+    /// Clipboard left every emoji row showing a generic placeholder in the
+    /// icon slot — caught by looking at it, not by any test.
+    Emoji {
+        /// The character itself.
+        emoji: String,
+    },
     /// A calculator answer. Activating it copies the value, which is what
     /// the result is for — the answer is already on screen.
     Calc {

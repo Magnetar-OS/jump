@@ -86,6 +86,7 @@ fn source_kind(source: &Source) -> u8 {
         Source::Process { .. } => 6,
         Source::Url { .. } => 7,
         Source::Calc { .. } => 8,
+        Source::Emoji { .. } => 9,
     }
 }
 
@@ -129,9 +130,9 @@ fn base_score(item: &Item, tokens: &[String]) -> f32 {
         // exhaustive and honest if that ever changes.
         Source::Process { .. } => 1.0,
 
-        // Only ever produced behind the `=` prefix, which claims the query
+        // Both are only ever produced behind a keyword that claims the query
         // outright, so this scale is not consulted.
-        Source::Calc { .. } => 1.0,
+        Source::Calc { .. } | Source::Emoji { .. } => 1.0,
 
         // Quicklinks claim the query outright and fallbacks are appended
         // below the merged list, so this scale is normally not consulted;
