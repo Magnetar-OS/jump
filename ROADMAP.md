@@ -232,8 +232,15 @@ second dimension of interaction on each row.
       libcosmic — so this is jump's own `reduce_motion` setting, and
       `Panel::set_reduced_motion` is the single place to read a desktop-wide
       key from if one ever ships.
-- [ ] Screen-reader pass over the result list (libcosmic `a11y` is already
-      enabled; verify rows announce title + subtitle + position)
+- [ ] Screen-reader pass over the result list. libcosmic's `a11y` feature is
+      enabled and rows carry text, but that is not the same claim as having
+      driven it with an AT-SPI client, which is what this item needs.
+- [ ] **Activation is swallowed while the content index builds.** Two
+      activations sent during an indexing window were dropped; every one
+      after it worked. The indexer takes the lock a chunk at a time under
+      `block_in_place` precisely so this does not happen, so it is a bug
+      rather than a limit. Observed window ~10 s for 304 documents; a cold
+      first run over 25,071 candidates is far longer.
 - [ ] Entrance scale component when upstream allows it: iced's `Float` only
       transforms above 1.0, so 0.96 → 1.0 renders unscaled today — upstream
       issue or local widget, decide once
@@ -341,9 +348,11 @@ makes the quality claims *verifiable* instead of asserted.
       boost, emoji scan, quicklink expansion. Set several times above the
       measured cost on purpose — they catch an order-of-magnitude regression
       (a clone per item, an O(n²) merge), not a busy runner.
-      ⬜ still unmeasured, because they need a live session rather than a
-      test binary: keybind → first frame, daemon resident memory, index
-      build time on a reference corpus.
+      Measured on a live session since: daemon resident memory 110 MB with
+      both indexes open; content indexing 304 documents in 10.3 s; selection
+      contrast 2.005 light against 2.105 dark, which is what the per-theme
+      alpha was for. ⬜ keybind → first frame still needs instrumentation in
+      the surface-configure path rather than an external stopwatch.
 - [ ] Time first-run content indexing to completion on a real home directory
       and publish the number (README currently says it has not been done)
 - [ ] Packaging: `packaging/linux` exists — finish deb recipe, AUR/COPR, and
