@@ -149,7 +149,7 @@ pub fn overlay<'a>(
         Mode::Search => results.len(),
         Mode::Grid => metrics.rows_for(apps.len()),
     };
-    let rect = surface::panel_rect(screen, mode, rows, metrics, layout);
+    let rect = surface::panel_rect(screen, mode, rows, metrics, layout, first_run);
     let fullscreen = mode == Mode::Grid && layout == GridLayout::Fullscreen;
 
     let content = panel_body(
@@ -271,7 +271,17 @@ fn panel_body<'a>(
         }
         Mode::Grid if !apps.is_empty() => {
             children.push(app_grid(
-                panel, now, alpha, apps, selected, rect, metrics, fullscreen, config, page,
+                panel,
+                now,
+                alpha,
+                apps,
+                selected,
+                rect,
+                metrics,
+                fullscreen,
+                config,
+                page,
+                if first_run { surface::HINT_HEIGHT } else { 0.0 },
             ));
         }
         _ => {}
@@ -468,6 +478,8 @@ fn app_grid<'a>(
     fullscreen: bool,
     config: &Config,
     page: usize,
+    // Space reserved below the grid for the first-run hint, or zero.
+    hint_height: f32,
 ) -> Element<'a, Message> {
     let total = apps.len();
 
@@ -535,10 +547,28 @@ fn app_grid<'a>(
         });
 
     // Sized to a whole number of rows so the viewport never cuts one in half.
+    //
+    // Everything this function stacks *below* the grid has to come out of the
+    // grid's own height, because that height is "whatever the panel rect has
+    // left" — anything not subtracted here is drawn past the panel's bottom
+    // edge and simply never appears.
+    //
+    // The page dots were in exactly that position before this was written:
+    // `page_dots` always occupies `DOT_ROW_HEIGHT` (it returns a Space of that
+    // height even for a single page), nothing subtracted it, and so a paged
+    // Launchpad overflowed its rect by 28 px and drew no dots at all. Adding
+    // the first-run hint made that visible, since the hint landed below them
+    // and vanished too.
+    let below_grid = hint_height
+        + if config.scroll.is_paged() {
+            DOT_ROW_HEIGHT
+        } else {
+            0.0
+        };
     let height = if fullscreen {
         metrics.visible_rows as f32 * metrics.cell_height
     } else {
-        rect.height - INPUT_HEIGHT - LIST_PADDING
+        rect.height - INPUT_HEIGHT - LIST_PADDING - below_grid
     };
     let height = Length::Fixed(height.max(metrics.cell_height));
 

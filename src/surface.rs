@@ -215,11 +215,19 @@ pub fn close(id: window::Id) -> Task<()> {
     destroy_layer_surface(id)
 }
 
+/// Height the first-run hint adds to the panel.
+///
+/// The panel is drawn into a fixed rectangle, so anything the view puts in
+/// the column has to be accounted for here too — a hint that the geometry
+/// does not know about is simply clipped, which is exactly what happened
+/// the first time this was tried.
+pub const HINT_HEIGHT: f32 = 26.0;
+
 /// Where the panel sits inside the full-screen surface.
 ///
 /// `rows` is the number of result rows currently visible, which lets the panel
 /// grow downward as results arrive instead of reserving space for a list that
-/// may be empty.
+/// may be empty. `hint` adds room for the first-run line.
 #[must_use]
 pub fn panel_rect(
     screen: cosmic::iced::Size,
@@ -227,6 +235,7 @@ pub fn panel_rect(
     rows: usize,
     metrics: GridMetrics,
     layout: GridLayout,
+    hint: bool,
 ) -> Rectangle {
     // Full-screen Launchpad is the whole output: there is no panel to place, and
     // the blur region becomes the entire surface, which is what gives the
@@ -261,6 +270,8 @@ pub fn panel_rect(
             )
         }
     };
+
+    let height = height + if hint { HINT_HEIGHT } else { 0.0 };
 
     let width = width.min(screen.width - 32.0);
     let height = height.min(screen.height - 32.0);

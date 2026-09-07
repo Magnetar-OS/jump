@@ -668,7 +668,14 @@ impl App {
             Mode::Search => self.results.len(),
             Mode::Grid => metrics.rows_for(self.apps.len()),
         };
-        let rect = surface::panel_rect(self.screen, mode, rows, metrics, self.config.grid_layout);
+        let rect = surface::panel_rect(
+            self.screen,
+            mode,
+            rows,
+            metrics,
+            self.config.grid_layout,
+            self.frecency.is_empty(),
+        );
 
         // Two switches, both of which have to be on. `frosted_system_interface`
         // is the desktop-wide one every COSMIC surface obeys, so ignoring it
