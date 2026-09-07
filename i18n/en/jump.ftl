@@ -158,3 +158,17 @@ provider-calculator = Calculator (=)
 
 ## Calculator
 calc-copy-subtitle = Copy the answer
+
+## Shown until the launcher has been used once.
+first-run-hint = Type to search · Ctrl+K for actions · try “clip”, “emoji”, “kill”, or “= 2+2”
+
+## The frecency inspector, shown under the action panel.
+ranking-never-used = Score { $score } · never used, so no usage boost
+ranking-used = Score { $score } · used { $count ->
+        [one] once
+       *[other] { $count } times
+    }, last { $days ->
+        [0] today
+        [one] yesterday
+       *[other] { $days } days ago
+    } · recency weight { $recency }

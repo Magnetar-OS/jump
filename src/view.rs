@@ -36,6 +36,7 @@ use crate::surface::{
     PANEL_RADIUS, ROW_HEIGHT, ROW_INSET,
 };
 use jump::config::{Config, GridLayout};
+use jump::fl;
 
 /// Edge length of a result row's leading icon.
 const ICON_SIZE: u16 = 40;
@@ -140,6 +141,7 @@ pub fn overlay<'a>(
     config: &Config,
     page: usize,
     actions: Option<&'a actions::Panel>,
+    first_run: bool,
 ) -> Element<'a, Message> {
     let layout = config.grid_layout;
     let alpha = panel.opacity(now);
@@ -165,6 +167,7 @@ pub fn overlay<'a>(
         fullscreen,
         config,
         page,
+        first_run,
     );
 
     // The action panel floats over the results, anchored to the bottom-right
@@ -224,6 +227,7 @@ fn panel_body<'a>(
     fullscreen: bool,
     config: &Config,
     page: usize,
+    first_run: bool,
 ) -> Element<'a, Message> {
     // Full screen centres a fixed-width field rather than stretching it to the
     // display: a 3440 px wide text field looks absurd and puts the caret miles
@@ -271,6 +275,23 @@ fn panel_body<'a>(
             ));
         }
         _ => {}
+    }
+
+    // On a first run the launcher is a blank field over a grid of icons with
+    // nothing saying what else it can do. One line, and only until the user
+    // has activated anything — the hint is keyed on there being no usage
+    // history at all, so it retires itself rather than needing a dismiss
+    // button and a setting to remember the dismissal.
+    if first_run {
+        children.push(
+            text::caption(fl!("first-run-hint"))
+                .class(cosmic::theme::Text::Color(alpha_text(alpha, false)))
+                .apply(container)
+                .width(Length::Fill)
+                .align_x(Alignment::Center)
+                .padding([6, 12, 10, 12])
+                .into(),
+        );
     }
 
     let fill = if fullscreen {
@@ -693,7 +714,21 @@ fn action_panel(panel: &actions::Panel, alpha: f32) -> Element<'_, Message> {
             .into()
     });
 
-    column::with_children(rows.collect::<Vec<_>>())
+    let mut card: Vec<Element<'_, Message>> = rows.collect();
+    // A dimmed footer under a hairline, so it reads as annotation rather than
+    // as one more thing to press.
+    if let Some(ranking) = panel.ranking.as_deref() {
+        card.push(
+            text::caption(ranking)
+                .class(cosmic::theme::Text::Color(alpha_text(alpha, false)))
+                .apply(container)
+                .padding([8, 12, 4, 12])
+                .width(Length::Fill)
+                .into(),
+        );
+    }
+
+    column::with_children(card)
         .apply(container)
         .padding(6)
         .width(Length::Fixed(ACTION_PANEL_WIDTH))

@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -33,14 +33,14 @@ const MAX_BOOST: f32 = 0.5;
 const MAX_AGE_DAYS: f64 = 90.0;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct Usage {
+struct Entry {
     /// Number of times this entry was activated.
     count: u32,
     /// Unix timestamp, seconds, of the most recent activation.
     last_used: u64,
 }
 
-impl Usage {
+impl Entry {
     /// Weight in 0.0..=1.0 from recency alone.
     fn recency_weight(&self, now: u64) -> f32 {
         let age_days = (now.saturating_sub(self.last_used) as f64) / 86_400.0;
@@ -67,10 +67,26 @@ impl Usage {
     }
 }
 
+/// One key's usage history, rendered for a person rather than for the
+/// ranker. See [`Frecency::explain`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Usage {
+    /// Times this entry has been activated.
+    pub count: u32,
+    /// How long ago the most recent activation was.
+    pub age: Duration,
+    /// What that age is currently worth, in `0.0..=1.0`. The bucket edges
+    /// are why this moves in steps rather than smoothly.
+    pub recency_weight: f32,
+    /// Volume times recency — the raw number the boost is derived from,
+    /// before it is normalised against the rest of the visible list.
+    pub score: f32,
+}
+
 /// Persistent activation history.
 #[derive(Debug, Default)]
 pub struct Frecency {
-    entries: HashMap<ItemKey, Usage>,
+    entries: HashMap<ItemKey, Entry>,
     path: Option<PathBuf>,
     /// Set when `entries` has changed since the last successful save.
     dirty: bool,
@@ -108,6 +124,34 @@ impl Frecency {
 
     fn default_path() -> Option<PathBuf> {
         dirs::data_dir().map(|dir| dir.join("jump").join("frecency.json"))
+    }
+
+    /// Whether nothing has ever been activated.
+    ///
+    /// The launcher uses this as its "first run" signal. It is a better one
+    /// than a stored flag: a flag has to be set by something and can drift
+    /// out of step with reality, whereas this is simply true until the user
+    /// has used the launcher once, and false forever after.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// What this key's usage history is, for explaining a ranking.
+    ///
+    /// Returns the number of activations, how long ago the last one was, and
+    /// the recency weight that age currently earns. `None` when the key has
+    /// never been activated, which is itself the answer to "why is this not
+    /// higher up".
+    #[must_use]
+    pub fn explain(&self, key: &ItemKey) -> Option<Usage> {
+        let now = now_secs();
+        self.entries.get(key).map(|usage| Usage {
+            count: usage.count,
+            age: Duration::from_secs(now.saturating_sub(usage.last_used)),
+            recency_weight: usage.recency_weight(now),
+            score: usage.score(now),
+        })
     }
 
     /// Record an activation.
@@ -263,7 +307,7 @@ mod tests {
 
     #[test]
     fn stale_usage_stops_contributing() {
-        let usage = Usage {
+        let usage = Entry {
             count: 100,
             last_used: 0,
         };

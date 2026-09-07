@@ -981,6 +981,29 @@ impl App {
         self.dismiss_with(release)
     }
 
+    /// One line saying why `item` sits where it does — the frecency
+    /// inspector, answering "why is this ranked here?" at the moment the
+    /// question arises rather than in a separate window.
+    ///
+    /// Score is shown to two decimals because the differences that decide
+    /// order are frequently in the second one.
+    fn explain_ranking(&self, item: &Item) -> Option<String> {
+        let score = format!("{:.2}", item.score);
+        let Some(usage) = self.frecency.explain(&item.key) else {
+            return Some(fl!("ranking-never-used", score = score.as_str()));
+        };
+
+        let days = usage.age.as_secs() / 86_400;
+        let recency = format!("{:.2}", usage.recency_weight);
+        Some(fl!(
+            "ranking-used",
+            score = score.as_str(),
+            count = usage.count,
+            days = days,
+            recency = recency.as_str()
+        ))
+    }
+
     /// Desktop-action display names for the application `item` refers to, in
     /// the order pop-launcher addresses them by index.
     ///
@@ -1634,6 +1657,9 @@ impl cosmic::Application for App {
                         kind,
                     }],
                     selected: 0,
+                    // Never drawn: this panel exists for exactly one
+                    // `run_action` call and is dropped on the next line.
+                    ranking: None,
                 });
                 self.run_action(0)
             }
@@ -1690,7 +1716,9 @@ impl cosmic::Application for App {
                 } else {
                     None
                 };
-                self.actions = actions::Panel::for_item(item, pinned, window);
+                let ranking = self.explain_ranking(item);
+                self.actions = actions::Panel::for_item(item, pinned, window)
+                    .map(|panel| panel.explaining(ranking));
                 tracing::debug!(
                     actions = self.actions.as_ref().map_or(0, |panel| panel.actions.len()),
                     "action panel opened"
@@ -1808,6 +1836,9 @@ impl cosmic::Application for App {
             &self.config,
             self.page(),
             self.actions.as_ref(),
+            // Nothing has ever been activated, so the launcher has never
+            // actually been used.
+            self.frecency.is_empty(),
         )
     }
 

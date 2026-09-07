@@ -81,6 +81,12 @@ pub enum WindowCommand {
 pub struct Panel {
     pub actions: Vec<Action>,
     pub selected: usize,
+    /// One line explaining why the selected result ranks where it does.
+    ///
+    /// Not an [`Action`]: it is something to read, not something to run, and
+    /// putting it in the list would make Enter land on a row that does
+    /// nothing. The view renders it as a footer under the actions.
+    pub ranking: Option<String>,
 }
 
 impl Panel {
@@ -113,7 +119,15 @@ impl Panel {
         Some(Self {
             actions,
             selected: 0,
+            ranking: None,
         })
+    }
+
+    /// Attach the ranking explanation, once the caller has looked it up.
+    #[must_use]
+    pub fn explaining(mut self, ranking: Option<String>) -> Self {
+        self.ranking = ranking;
+        self
     }
 
     /// Move the highlight by a signed step, saturating at the ends.

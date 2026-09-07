@@ -21,6 +21,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- A first-run hint naming Ctrl+K and the keyword providers, shown until the
+  launcher has been used once.
+- The action panel now explains why the selected result ranks where it does:
+  score, activation count, how long since the last one, and the recency
+  weight that age earns.
+
 - Calculator and unit conversion behind `=`, answered by Qalculate directly:
   `= 15*3` gives `45`, `= 5 km to miles` converts. The answer is shown in
   large type and Enter copies it. pop-launcher's own calc plugin is not used

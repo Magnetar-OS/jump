@@ -266,9 +266,18 @@ second dimension of interaction on each row.
       forwarded to the running daemon over D-Bus — a COSMIC custom shortcut
       bound to `jump show clip` is a per-command hotkey without jump owning
       any global keybinding state
-- [ ] Frecency inspector ("why is this ranked here?") and a reset button
-- [ ] First-run experience: a short, dismissable hint row (bind a shortcut,
-      try Ctrl+K) instead of an empty launchpad with no explanation
+- [x] Frecency inspector: the action panel carries a footer line saying why
+      the selected result ranks where it does — its score, how many times it
+      has been activated, how long ago, and what recency weight that age
+      currently earns. Rendered as annotation rather than an action, so Enter
+      cannot land on a row that does nothing, and shown where the question
+      actually arises instead of in a separate window. ⬜ a reset button.
+- [x] First-run experience: one hint line under the panel naming the things
+      that are not discoverable — Ctrl+K, and the `clip` / `emoji` / `kill` /
+      `=` keywords. It is keyed on the usage history being empty rather than
+      on a stored flag, so it retires itself the moment the launcher is used
+      once and needs neither a dismiss button nor a setting to remember the
+      dismissal.
 
 ## Pillar 5 — COSMIC conventions compliance
 
