@@ -1,6 +1,6 @@
 [package]
 name = "jump-core"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
@@ -14,7 +14,7 @@ description = "Search engine, ranking, and plugin host for the jump launcher"
 # crate-local file rather than the workspace README: that one describes the
 # COSMIC application, which is not what an importer of this crate is getting.
 readme = "README.md"
-homepage = "https://github.com/entro314-labs/jump"
+homepage = "https://github.com/Magnetar-OS/jump"
 documentation = "https://docs.rs/jump-core"
 keywords = ["launcher", "search", "fuzzy", "frecency", "desktop"]
 categories = ["os::linux-apis", "text-processing", "filesystem"]

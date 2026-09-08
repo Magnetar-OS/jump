@@ -1,6 +1,6 @@
 # jump-core
 
-Search engine, ranking, and plugin host for the [jump](https://github.com/entro314-labs/jump)
+Search engine, ranking, and plugin host for the [jump](https://github.com/Magnetar-OS/jump)
 launcher.
 
 This crate is everything a launcher frontend needs that is not drawing. It has

@@ -16,7 +16,7 @@ section: utils
 priority: optional
 maintainer: Dominikos Pritis <dominikos.pritis@gmail.com>
 vendor: entro314-labs
-homepage: https://github.com/entro314-labs/jump
+homepage: https://github.com/Magnetar-OS/jump
 # The packaged artefact is the launcher binaries, which are GPL-3.0-only.
 # Only the `jump-core` engine crate is MPL-2.0, and it is not what ships here.
 license: GPL-3.0-only

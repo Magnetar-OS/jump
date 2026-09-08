@@ -4,7 +4,7 @@ members = ["crates/jump-core"]
 [workspace.package]
 edition = "2024"
 rust-version = "1.98.0"
-repository = "https://github.com/entro314-labs/jump"
+repository = "https://github.com/Magnetar-OS/jump"
 
 [workspace.dependencies]
 serde = { version = "1.0.229", features = ["derive"] }

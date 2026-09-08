@@ -45,9 +45,9 @@
     <control>pointing</control>
   </supports>
 
-  <url type="homepage">https://github.com/entro314-labs/jump</url>
-  <url type="bugtracker">https://github.com/entro314-labs/jump/issues</url>
-  <url type="vcs-browser">https://github.com/entro314-labs/jump</url>
+  <url type="homepage">https://github.com/Magnetar-OS/jump</url>
+  <url type="bugtracker">https://github.com/Magnetar-OS/jump/issues</url>
+  <url type="vcs-browser">https://github.com/Magnetar-OS/jump</url>
 
   <developer id="dev.entro314labs">
     <name>entro314 labs</name>

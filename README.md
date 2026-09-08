@@ -242,7 +242,7 @@ existing workflow scripts port by writing a manifest:
 
 ```json
 {"items": [
-  {"uid": "repo-jump", "title": "entro314-labs/jump", "subtitle": "Rust",
+  {"uid": "repo-jump", "title": "Magnetar-OS/jump", "subtitle": "Rust",
    "arg": "…", "autocomplete": "gh jump ", "valid": true}
 ]}
 ```
@@ -261,7 +261,7 @@ off from the settings window.
 from the action panel, where each is labelled with its key:
 
 ```json
-{"items": [{"title": "entro314-labs/jump", "arg": "…", "mods": {
+{"items": [{"title": "Magnetar-OS/jump", "arg": "…", "mods": {
   "ctrl": {"subtitle": "Open on the web", "arg": "https://github.com/…"},
   "alt":  {"subtitle": "Copy clone URL",  "variables": {"MODE": "clone"}}
 }}]}

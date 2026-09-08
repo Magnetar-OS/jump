@@ -1,6 +1,6 @@
 [Unit]
 Description=Jump launcher daemon
-Documentation=https://github.com/entro314-labs/jump
+Documentation=https://github.com/Magnetar-OS/jump
 PartOf=graphical-session.target
 After=graphical-session.target
 
