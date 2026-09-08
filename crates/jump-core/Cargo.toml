@@ -10,6 +10,15 @@ repository.workspace = true
 license = "MPL-2.0"
 description = "Search engine, ranking, and plugin host for the jump launcher"
 
+# crates.io front matter. `readme` is what the crate page renders, and it is a
+# crate-local file rather than the workspace README: that one describes the
+# COSMIC application, which is not what an importer of this crate is getting.
+readme = "README.md"
+homepage = "https://github.com/entro314-labs/jump"
+documentation = "https://docs.rs/jump-core"
+keywords = ["launcher", "search", "fuzzy", "frecency", "desktop"]
+categories = ["os::linux-apis", "text-processing", "filesystem"]
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
