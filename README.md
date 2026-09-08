@@ -138,13 +138,13 @@ highlighted window without leaving the launcher.
 ## Configuration
 
 Settings are stored through **cosmic-config**, the same mechanism every COSMIC
-application uses, under `~/.config/cosmic/dev.entro314labs.Jump/v1/`. One RON
+application uses, under `~/.config/cosmic/com.magnetaros.Jump/v1/`. One RON
 file per key, and changes are applied **live** — the daemon picks them up without
 a restart, which matters for a process that stays running all session.
 
 ```sh
-echo -n 'panel' > ~/.config/cosmic/dev.entro314labs.Jump/v1/grid_layout
-echo -n 'false' > ~/.config/cosmic/dev.entro314labs.Jump/v1/blur
+echo -n 'panel' > ~/.config/cosmic/com.magnetaros.Jump/v1/grid_layout
+echo -n 'false' > ~/.config/cosmic/com.magnetaros.Jump/v1/blur
 ```
 
 Full key reference: [`examples/settings.md`](examples/settings.md). An unset key

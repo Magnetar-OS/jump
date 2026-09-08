@@ -7,7 +7,7 @@ Comment=Search applications, windows, files, and clipboard
 # overlay, so the same command both starts and shows it. That is what makes this
 # usable directly as a keyboard shortcut.
 Exec=jump
-Icon=dev.entro314labs.Jump
+Icon=com.magnetaros.Jump
 Terminal=false
 Categories=Utility;
 Keywords=launcher;search;spotlight;run;

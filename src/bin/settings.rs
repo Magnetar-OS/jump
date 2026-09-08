@@ -26,7 +26,7 @@ use jump::config::{Config, GridLayout, ScrollMode};
 use jump::fl;
 use jump_core::PluginHost;
 
-const ID: &str = "dev.entro314labs.JumpSettings";
+const ID: &str = "com.magnetaros.JumpSettings";
 
 fn main() -> cosmic::iced::Result {
     tracing_subscriber::fmt()

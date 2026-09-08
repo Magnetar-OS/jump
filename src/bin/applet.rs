@@ -20,7 +20,7 @@ use cosmic::app::{Core, Task};
 use cosmic::iced::window::Id;
 use cosmic::{Element, widget};
 
-const ID: &str = "dev.entro314labs.JumpApplet";
+const ID: &str = "com.magnetaros.JumpApplet";
 
 fn main() -> cosmic::iced::Result {
     tracing_subscriber::fmt()

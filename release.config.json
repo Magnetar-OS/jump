@@ -1,5 +1,5 @@
 {
-  "versionFiles": ["Cargo.toml", "Cargo.lock", "data/metainfo/dev.entro314labs.Jump.metainfo.xml"],
+  "versionFiles": ["Cargo.toml", "Cargo.lock", "data/metainfo/com.magnetaros.Jump.metainfo.xml"],
   "publish": null,
   "steps": ["version", "changelog", "tag", "push"]
 }

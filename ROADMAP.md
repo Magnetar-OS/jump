@@ -295,7 +295,7 @@ live watch, theme tokens, frosted gating, layer-surface create/destroy, the
 three-step launch sequence, justfile with `rootdir`/`vendor`). What remains is
 the long tail that separates "works" from "indistinguishable from first-party":
 
-- [x] One RDNN id (`dev.entro314labs.Jump`) across config store, desktop
+- [x] One RDNN id (`com.magnetaros.Jump`) across config store, desktop
       entries, metainfo, icons, D-Bus
 - [x] i18n-embed + Fluent + `fl!` wired (`src/localize.rs`), catalogue layout
       Weblate expects

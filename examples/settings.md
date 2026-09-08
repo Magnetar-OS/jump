@@ -4,7 +4,7 @@
 COSMIC application uses. They live under:
 
 ```
-~/.config/cosmic/dev.entro314labs.Jump/v1/
+~/.config/cosmic/com.magnetaros.Jump/v1/
 ```
 
 One file per setting, each containing a RON value. Changes are picked up
@@ -12,10 +12,10 @@ One file per setting, each containing a RON value. Changes are picked up
 
 ```sh
 # Use a centred panel instead of a full-screen Launchpad.
-echo -n 'panel' > ~/.config/cosmic/dev.entro314labs.Jump/v1/grid_layout
+echo -n 'panel' > ~/.config/cosmic/com.magnetaros.Jump/v1/grid_layout
 
 # Turn compositor blur off.
-echo -n 'false' > ~/.config/cosmic/dev.entro314labs.Jump/v1/blur
+echo -n 'false' > ~/.config/cosmic/com.magnetaros.Jump/v1/blur
 ```
 
 An unset key uses its default; an unreadable one logs a warning and falls back,

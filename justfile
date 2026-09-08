@@ -1,7 +1,7 @@
 # Name of the application's binary.
 name := 'jump'
 # The unique ID of the application, matching `App::APP_ID`.
-appid := 'dev.entro314labs.Jump'
+appid := 'com.magnetaros.Jump'
 
 # Path to root file system, which defaults to `/`.
 rootdir := ''
