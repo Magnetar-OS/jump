@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The deb, rpm, Arch and AUR packages declared themselves MPL-2.0. That is
+  the licence of the `jump-core` engine crate; the binaries in those packages
+  are GPL-3.0-only, as the AppStream metainfo already stated.
 - The selection highlight was noticeably weaker in a light theme than a dark
   one; its opacity now follows the theme so both carry the same weight.
 
@@ -21,6 +24,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `jump-core`, the UI-free engine, is published to crates.io so a second
+  frontend can depend on it as a normal crate rather than a path.
 - A first-run hint naming Ctrl+K and the keyword providers, shown until the
   launcher has been used once.
 - The action panel now explains why the selected result ranks where it does:
