@@ -31,10 +31,13 @@ use tokio::sync::{Mutex, mpsc};
 
 use crate::model::Item;
 
+/// Why the service could not be started.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// `pop-launcher` could not be executed — usually not installed.
     #[error("failed to spawn the pop-launcher service")]
     Spawn(#[source] std::io::Error),
+    /// The child started but its stdin or stdout was not piped back to us.
     #[error("pop-launcher stdin/stdout was not captured")]
     MissingPipe,
 }
@@ -45,21 +48,30 @@ pub enum Event {
     /// A new result set. `query` is the search text that was most recently
     /// sent, not necessarily the one the user has typed by now.
     Update {
+        /// Monotonic query generation, to discard responses overtaken by a
+        /// newer keystroke.
         seq: u64,
+        /// The search text this set answers.
         query: String,
+        /// The results, in the order the service returned them.
         items: Vec<Item>,
     },
     /// The service wants the input box replaced (tab completion).
     Fill(String),
     /// A desktop entry the frontend is responsible for launching.
     DesktopEntry {
+        /// Path to the `.desktop` file to launch.
         path: std::path::PathBuf,
+        /// Whether the entry asked for the discrete GPU.
         gpu_preference: GpuPreference,
+        /// A named desktop action to run instead of the default `Exec`.
         action_name: Option<String>,
     },
     /// Context menu options for a result.
     Context {
+        /// The result the options belong to.
         id: Indice,
+        /// The options themselves, to be shown as secondary actions.
         options: Vec<pop_launcher::ContextOption>,
     },
     /// The service considers the interaction finished; dismiss the UI.
@@ -83,6 +95,11 @@ impl Launcher {
     ///
     /// Returns the write handle and the stream of events. The child is killed
     /// when the returned [`LauncherGuard`] drops.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Spawn`] if `pop-launcher` is not on `PATH` or cannot be
+    /// executed, and [`Error::MissingPipe`] if its stdio was not captured.
     pub fn spawn() -> Result<(Self, mpsc::UnboundedReceiver<Event>, LauncherGuard), Error> {
         let mut child = Command::new("pop-launcher")
             .stdin(Stdio::piped())
@@ -209,18 +226,22 @@ impl Launcher {
         seq
     }
 
+    /// Run a result's primary action.
     pub fn activate(&self, id: Indice) {
         self.send(Request::Activate(id));
     }
 
+    /// Ask for tab completion of a result; answered with [`Event::Fill`].
     pub fn complete(&self, id: Indice) {
         self.send(Request::Complete(id));
     }
 
+    /// Ask for a result's context options; answered with [`Event::Context`].
     pub fn context(&self, id: Indice) {
         self.send(Request::Context(id));
     }
 
+    /// Run one of the context options previously returned for `id`.
     pub fn activate_context(&self, id: Indice, context: Indice) {
         self.send(Request::ActivateContext { id, context });
     }
@@ -236,6 +257,7 @@ impl Launcher {
         self.send(Request::Close);
     }
 
+    /// Cancel the in-flight search without dismissing the session.
     pub fn interrupt(&self) {
         self.send(Request::Interrupt);
     }

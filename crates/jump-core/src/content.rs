@@ -125,10 +125,13 @@ const RESULTS: usize = 8;
 /// Documents written per transaction. See [`Content::index`].
 const BATCH: usize = 400;
 
+/// Why a content-index operation failed.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// The database could not be opened or its schema not created.
     #[error("could not open the content index")]
     Open(#[source] rusqlite::Error),
+    /// A query against an open index failed.
     #[error("content index query failed")]
     Query(#[source] rusqlite::Error),
 }
@@ -152,6 +155,11 @@ impl std::fmt::Debug for Content {
 
 impl Content {
     /// Open, creating the schema if needed.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Open`] if the database cannot be opened or the schema cannot
+    /// be created.
     pub fn open(path: &Path, extensions: Vec<String>, limits: Limits) -> Result<Self, Error> {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -224,6 +232,7 @@ impl Content {
     }
 
     /// Number of indexed documents.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.connection
             .query_row("SELECT count(*) FROM documents", [], |row| {
@@ -232,6 +241,7 @@ impl Content {
             .map_or(0, |count| count as usize)
     }
 
+    /// Whether the index holds no documents.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -343,6 +353,10 @@ impl Content {
     }
 
     /// Search document contents, ranked by BM25.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Query`] if the underlying FTS5 query fails.
     pub fn search(&self, query: &str) -> Result<Vec<Item>, Error> {
         let Some(expression) = fts_query(query) else {
             return Ok(Vec::new());

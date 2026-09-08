@@ -29,6 +29,12 @@
 //! # }
 //! ```
 
+// This crate is published, so its public surface is the contract a second
+// frontend builds against. Undocumented public items are a defect here in a
+// way they are not in the application binary.
+#![warn(missing_docs)]
+#![warn(clippy::missing_errors_doc, clippy::missing_panics_doc)]
+
 pub mod calc;
 pub mod content;
 pub mod emoji;

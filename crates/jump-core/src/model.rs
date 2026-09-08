@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 pub struct ItemKey(pub String);
 
 impl ItemKey {
+    /// The key as a string slice.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -49,11 +50,20 @@ pub enum Source {
     /// An open window, activated through the compositor rather than by
     /// launching anything. Carries only the compositor's identifier string, so
     /// the engine stays free of Wayland types.
-    Window { identifier: String },
+    Window {
+        /// The compositor's opaque handle for the window.
+        identifier: String,
+    },
     /// A file on disk, opened with the user's default handler.
-    File { path: std::path::PathBuf },
+    File {
+        /// Absolute path to the file.
+        path: std::path::PathBuf,
+    },
     /// A clipboard history entry; activating it copies the text back.
-    Clipboard { text: String },
+    Clipboard {
+        /// The stored text, copied back on activation.
+        text: String,
+    },
     /// Produced by a jump plugin; activate by running the plugin's action.
     Plugin {
         /// Directory name of the plugin that produced this item.
@@ -154,13 +164,17 @@ pub struct Item {
     /// pop-launcher's per-query index. Only valid for the query that produced
     /// this item, so it is refreshed on every update rather than remembered.
     pub id: Indice,
+    /// Primary line — the application, file, or window name.
     pub title: String,
+    /// Secondary line — the path, the command, the window's application.
     pub subtitle: String,
+    /// Leading icon, when the provider offered one.
     pub icon: Option<Icon>,
     /// Icon representing the plugin/category, shown trailing.
     pub category_icon: Option<Icon>,
     /// Set when the result refers to an open window rather than a launchable.
     pub window: Option<(Generation, Indice)>,
+    /// Which provider produced this, and hence how it is activated.
     pub source: Source,
     /// Text that replaces the query on Tab, Alfred's `autocomplete`.
     pub autocomplete: Option<String>,
@@ -225,16 +239,21 @@ pub struct Results {
     /// Monotonic query generation. Used to discard responses that arrive after
     /// the user has already typed something newer.
     pub seq: u64,
+    /// The query text these items answer. The frontend compares it against the
+    /// current input to detect a stale set. See [`crate::launcher`].
     pub query: String,
+    /// The rows, best first.
     pub items: Vec<Item>,
 }
 
 impl Results {
+    /// Whether there are no items.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
 
+    /// Number of items.
     #[must_use]
     pub fn len(&self) -> usize {
         self.items.len()

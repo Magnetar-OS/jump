@@ -39,7 +39,8 @@
 //! ## Isolation
 //!
 //! A plugin is an arbitrary program on the interactive path, so it is held to a
-//! hard deadline. Exceeding [`QUERY_TIMEOUT`] kills the process and drops its
+//! hard deadline. Exceeding it (180 ms by default, raised per plugin with
+//! `timeout_ms`) kills the process and drops its
 //! results rather than delaying the frame — a broken plugin degrades its own
 //! results and nothing else.
 
@@ -75,6 +76,7 @@ const MAX_OUTPUT_BYTES: usize = 1 << 20;
 pub struct Manifest {
     /// Human-readable name, shown as the result category.
     pub name: String,
+    /// One-line explanation, shown as the result subtitle.
     #[serde(default)]
     pub description: String,
     /// When set, the plugin only runs for queries starting with this word.
@@ -214,6 +216,7 @@ const RERUN_RANGE: std::ops::RangeInclusive<f64> = 0.5..=5.0;
 /// asked to be re-run should see the same query again.
 #[derive(Debug, Clone, Default)]
 pub struct QueryResults {
+    /// Everything the plugins returned, concatenated.
     pub items: Vec<Item>,
     /// Soonest requested rerun across the plugins that answered.
     pub rerun: Option<Duration>,
@@ -235,7 +238,9 @@ fn merge_variables(
 /// A discovered plugin: its manifest plus the directory it lives in.
 #[derive(Debug, Clone)]
 pub struct Plugin {
+    /// The parsed `manifest.toml`.
     pub manifest: Manifest,
+    /// Where the plugin lives. Commands are resolved relative to it.
     pub directory: PathBuf,
     /// Directory name, used as the stable plugin identifier.
     pub id: String,
@@ -614,6 +619,7 @@ impl PluginHost {
             .map(|plugin| (plugin, !self.disabled.contains(&plugin.id)))
     }
 
+    /// Whether no plugins were discovered.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.plugins.is_empty()
@@ -696,13 +702,16 @@ impl PluginHost {
 /// What `lint` found. Errors stop the plugin working; warnings do not.
 #[derive(Debug, Default)]
 pub struct LintReport {
+    /// Problems that stop the plugin from working at all.
     pub errors: Vec<String>,
+    /// Problems worth fixing that do not stop it working.
     pub warnings: Vec<String>,
     /// Items the sample query produced, when it ran at all.
     pub items: usize,
 }
 
 impl LintReport {
+    /// Whether nothing blocking was found. Warnings are still allowed.
     #[must_use]
     pub fn is_clean(&self) -> bool {
         self.errors.is_empty()
@@ -879,6 +888,11 @@ pub async fn lint(directory: &Path, sample_query: &str) -> LintReport {
 ///
 /// Refuses to touch a directory that already exists — a scaffolder that can
 /// overwrite a real plugin is a footgun, not a convenience.
+///
+/// # Errors
+///
+/// [`std::io::ErrorKind::AlreadyExists`] if `directory` is already there, and
+/// any I/O error from creating the directory or writing the files in it.
 pub fn scaffold(directory: &Path, name: &str) -> std::io::Result<()> {
     if directory.exists() {
         return Err(std::io::Error::new(

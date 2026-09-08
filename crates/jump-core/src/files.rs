@@ -75,6 +75,7 @@ const PRUNE_NAMES: &str = ".git node_modules .cache __pycache__ .venv venv targe
 /// own — they match nearly everything.
 const MIN_TOKEN: usize = 2;
 
+/// What to index and what to return. Comes from the user's configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
     /// Whether file search runs at all.
@@ -131,6 +132,10 @@ pub struct Files {
 }
 
 impl Files {
+    /// Build a searcher for `config`.
+    ///
+    /// Returns `None` when file search is disabled, or when no XDG data
+    /// directory is available to hold the index.
     #[must_use]
     pub fn new(config: Config) -> Option<Self> {
         if !config.enabled {
