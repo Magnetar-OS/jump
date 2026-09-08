@@ -75,7 +75,22 @@ bench *args:
 # does is a software centre. `--no-net` so the check passes without reaching
 # the URLs; run `appstreamcli validate` by hand for the networked pass.
 validate:
-    desktop-file-validate data/applications/*.desktop
+    #!/usr/bin/env bash
+    set -uo pipefail
+    # `Categories=COSMIC;` is what every COSMIC applet ships — all 17 in a
+    # stock install — but it is not a registered freedesktop category, and
+    # desktop-file-validate 0.27 (Ubuntu noble, which is what CI has) rejects
+    # it as an error. 0.28 downgraded it to a hint, which is why this passes
+    # on a current machine and failed in CI. Spelling it `X-COSMIC` would
+    # satisfy the validator and diverge from the entire ecosystem, so the
+    # older validator is the thing to work around, not the file. Every other
+    # error still fails this recipe.
+    output=$(desktop-file-validate data/applications/*.desktop 2>&1 || true)
+    [ -n "$output" ] && printf '%s\n' "$output"
+    if printf '%s\n' "$output" | grep 'error:' | grep -qv 'unregistered value "COSMIC"'; then
+        echo 'validate: desktop entry validation failed' >&2
+        exit 1
+    fi
     appstreamcli validate --no-net data/metainfo/*.metainfo.xml
 
 # Vendors dependencies so packaged and offline builds can resolve the git deps
