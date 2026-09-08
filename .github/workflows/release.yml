@@ -77,7 +77,9 @@ jobs:
       product_name: 'jump'
       pkgdesc: 'Search applications, windows, files, and clipboard'
       url: 'https://github.com/entro314-labs/jump'
-      license: 'MPL-2.0'
+      # The binaries in this package are GPL-3.0-only; MPL-2.0 covers only
+      # the jump-core engine crate, which is published to crates.io, not here.
+      license: 'GPL-3.0-only'
       depends: 'libxkbcommon sqlite'
       provides: 'jump'
       conflicts: 'jump'
