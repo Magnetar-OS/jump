@@ -62,7 +62,7 @@ jobs:
       tag: ${{ inputs.tag || '' }}
       product_name: 'jump'
       repo_name: 'entro314labs'
-      pages_repo: 'entro314-labs/arch-repo'
+      pages_repo: 'Magnetar-OS/arch-repo'
     secrets: inherit
 
   # AUR listing. Validates on every release; publishes only when the
