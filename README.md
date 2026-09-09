@@ -90,9 +90,16 @@ documents and projects first, hidden trees last — before any extraction happen
 so the `content_max_mb` ceiling costs the least useful documents rather than
 whichever happened to come last. Extraction reuses one buffer across the whole
 pass and borrows the bytes when they are already valid UTF-8, instead of the
-three allocations per file the first version made. The pass runs under
-`block_in_place`, taking the index lock a chunk at a time, so queries interleave
-with indexing rather than queueing behind it.
+three allocations per file the first version made.
+
+The pass runs on its own OS thread, taking the index lock a chunk at a time so
+queries interleave with indexing rather than queueing behind it. It used to run
+on the application's runtime under `block_in_place`, which was wrong: with the
+`tokio` feature enabled `cosmic::executor::Default` is a runtime with exactly
+**one** worker thread, and `block_in_place` works by handing pending tasks to
+another worker. There was none, so indexing starved everything else the
+launcher does — activations sent mid-pass simply never opened the overlay. A
+thread the runtime does not own cannot occupy it.
 
 Package-manager caches are excluded from both indexes. On this machine they
 contributed the majority of 41,412 content candidates and a 111 MB index made
