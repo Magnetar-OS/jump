@@ -722,35 +722,65 @@ impl App {
             // Indexing runs detached so the index is queryable *while* it is
             // being built. Waiting for it to finish first meant a first run
             // silently had no content search at all for several minutes.
+            //
+            // It runs on its own OS thread rather than on the application's
+            // runtime, because that runtime has exactly one worker:
+            // `cosmic::executor::Default` is `single::Executor`, which builds
+            // `new_multi_thread().worker_threads(1)`. Reading and parsing
+            // 25 000 documents on the only worker starves everything else the
+            // launcher does on it — measured, with activations sent during an
+            // indexing pass never opening the overlay while every activation
+            // after the pass worked. `block_in_place` was supposed to prevent
+            // that by handing pending tasks to another worker; with one worker
+            // configured there is no other worker to hand them to.
+            //
+            // A plain thread sidesteps the question entirely: the indexer
+            // cannot occupy a runtime it is not running on. Queries still
+            // contend for the index mutex a chunk at a time, which is the
+            // intended and bounded cost.
             let background = Arc::clone(&content);
-            tokio::spawn(async move {
-                let candidates = files.content_candidates(&configured).await;
-                tracing::info!(candidates = candidates.len(), "indexing file contents");
+            let spawned = std::thread::Builder::new()
+                .name("jump-content-index".to_owned())
+                .spawn(move || {
+                    // `content_candidates` is async, so this thread needs a
+                    // runtime of its own — a current-thread one, since the
+                    // only thing it drives is that single call.
+                    let runtime = match tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        Ok(runtime) => runtime,
+                        Err(error) => {
+                            tracing::warn!(%error, "no runtime for content indexing");
+                            return;
+                        }
+                    };
 
-                {
-                    let mut guard = background.lock().await;
-                    guard.prune_missing();
-                }
+                    let candidates = runtime.block_on(files.content_candidates(&configured));
+                    tracing::info!(candidates = candidates.len(), "indexing file contents");
 
-                // The lock is taken per chunk rather than for the whole pass:
-                // holding it across 24 000 documents would block every query
-                // behind the indexer.
-                let mut indexed = 0;
-                for chunk in candidates.chunks(CONTENT_CHUNK) {
-                    let mut guard = background.lock().await;
-                    // `index` reads files and writes SQLite — blocking work. Run
-                    // under `block_in_place` so the runtime moves other tasks to
-                    // a different worker instead of stalling them behind it.
-                    indexed += tokio::task::block_in_place(|| guard.index(chunk));
-                    drop(guard);
+                    background.blocking_lock().prune_missing();
 
-                    if background.lock().await.is_full() {
-                        break;
+                    // The lock is taken per chunk rather than for the whole
+                    // pass: holding it across 25 000 documents would block
+                    // every query behind the indexer.
+                    let started = Instant::now();
+                    let mut indexed = 0;
+                    for chunk in candidates.chunks(CONTENT_CHUNK) {
+                        indexed += background.blocking_lock().index(chunk);
+                        if background.blocking_lock().is_full() {
+                            break;
+                        }
                     }
-                    tokio::task::yield_now().await;
-                }
-                tracing::info!(indexed, "content indexing finished");
-            });
+                    tracing::info!(
+                        indexed,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "content indexing finished"
+                    );
+                });
+            if let Err(error) = spawned {
+                tracing::warn!(%error, "could not start the content indexing thread");
+            }
 
             cosmic::action::app(Message::ContentReady(content))
         })
