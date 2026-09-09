@@ -235,12 +235,12 @@ second dimension of interaction on each row.
 - [ ] Screen-reader pass over the result list. libcosmic's `a11y` feature is
       enabled and rows carry text, but that is not the same claim as having
       driven it with an AT-SPI client, which is what this item needs.
-- [ ] **Activation is swallowed while the content index builds.** Two
-      activations sent during an indexing window were dropped; every one
-      after it worked. The indexer takes the lock a chunk at a time under
-      `block_in_place` precisely so this does not happen, so it is a bug
-      rather than a limit. Observed window ~10 s for 304 documents; a cold
-      first run over 25,071 candidates is far longer.
+- [x] **Activation is no longer swallowed while the content index builds.**
+      `cosmic::executor::Default` is `single::Executor` — one worker thread —
+      so `block_in_place` had no other worker to hand pending tasks to, and
+      the indexer starved the launcher's only worker. The pass now runs on
+      its own OS thread. Verified against a forced full pass over 197,615
+      candidates: five of five activations opened the overlay mid-pass.
 - [ ] Entrance scale component when upstream allows it: iced's `Float` only
       transforms above 1.0, so 0.96 → 1.0 renders unscaled today — upstream
       issue or local widget, decide once
@@ -348,10 +348,13 @@ makes the quality claims *verifiable* instead of asserted.
       boost, emoji scan, quicklink expansion. Set several times above the
       measured cost on purpose — they catch an order-of-magnitude regression
       (a clone per item, an O(n²) merge), not a busy runner.
-      Measured on a live session since: daemon resident memory 110 MB with
-      both indexes open; content indexing 304 documents in 10.3 s; selection
-      contrast 2.005 light against 2.105 dark, which is what the per-theme
-      alpha was for. ⬜ keybind → first frame still needs instrumentation in
+      Measured on a live session since: daemon resident memory 27 MB before
+      the overlay is first shown and 102-106 MB after, stable across 56
+      open/close cycles — the step is the wgpu device, which the daemon
+      exists to create once, and it is not a leak; content indexing 304
+      documents in 10.3 s; file index rebuild 9.1 s; selection contrast
+      2.005 light against 2.105 dark, which is what the per-theme alpha
+      was for. ⬜ keybind → first frame still needs instrumentation in
       the surface-configure path rather than an external stopwatch.
 - [ ] Time first-run content indexing to completion on a real home directory
       and publish the number (README currently says it has not been done)

@@ -385,8 +385,11 @@ Measured on a live COSMIC session rather than a test binary:
 
 | | |
 |---|---|
-| Daemon resident memory, settled, both indexes open | 110 MB |
+| Daemon resident memory, before the overlay is ever shown | 27 MB |
+| Daemon resident memory, after the first open | 110 MB |
+| Daemon resident memory, steady state over 56 open/close cycles | 102–106 MB |
 | Content indexing, incremental pass | 304 documents in 10.3 s |
+| File index rebuild, `$HOME` | 9.1 s |
 | Selection contrast against the panel, light theme | 2.005 |
 | Selection contrast against the panel, dark theme | 2.105 |
 
@@ -394,24 +397,23 @@ The two selection figures are the point of the per-theme alpha: a single
 value gave 1.71 on light against 2.12 on dark, so the highlight was visibly
 weaker in one mode. They now sit within 5% of each other.
 
+The memory figures are the answer to "is 110 MB too much for a launcher".
+Almost all of it is the wgpu device, created once on the first open and kept
+for the life of the daemon — which is the point of running as a daemon at
+all. It is not a leak: across 56 open/close cycles the figure settles between
+102 and 106 MB and drifts down as often as up. Before the overlay has ever
+been shown the daemon holds 27 MB, and 17.5 MB of that is the binary's own
+mapped text.
+
 Still unmeasured: keybind → first frame, which needs instrumentation inside
 the surface-configure path rather than an external stopwatch.
 
 ## Known rough edges
 
 
-- **The launcher does not respond while the content index is being built.**
-  Measured on a live session: two activations sent during an indexing window
-  were swallowed entirely, and every activation after it succeeded. The
-  indexer takes the index lock a chunk at a time under `block_in_place`
-  specifically so queries interleave, so this is not working as intended. The
-  window observed was ~10 s for an incremental pass of 304 documents; a real
-  first run over 25,071 candidates is far longer. Turning file-content
-  indexing off (`files.content`, the default) avoids it entirely.
-- Resident memory is **110 MB** for the daemon once settled, measured with
-  both indexes open. Whether that is reasonable for wgpu plus two SQLite
-  databases or hides a leak is not yet established — there is no baseline to
-  compare against.
+- The entrance animation is opacity plus a short rise, with no scale
+  component: iced's `Float` only applies a transform when scaling above 1.0,
+  so a 0.96 → 1.0 entrance would silently render unscaled.
 - The entrance animation is opacity plus a short rise. There is no scale
   component: iced's `Float` only applies a transform when scaling above 1.0, so
   a 0.96 → 1.0 entrance would silently render unscaled.
