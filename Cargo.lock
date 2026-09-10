@@ -2858,7 +2858,7 @@ dependencies = [
 
 [[package]]
 name = "jump"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "dirs 7.0.0",
  "i18n-embed",
@@ -2883,7 +2883,7 @@ dependencies = [
 
 [[package]]
 name = "jump-core"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "dirs 7.0.0",
  "emojis",
