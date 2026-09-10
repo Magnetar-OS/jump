@@ -55,10 +55,10 @@
 
   <content_rating type="oars-1.1" />
 
-  <!-- Software-centre accent, sampled from the app icon's blue. -->
+  <!-- Software-centre accent, sampled from the app icon's orange. -->
   <branding>
-    <color type="primary" scheme_preference="light">#9fc0fb</color>
-    <color type="primary" scheme_preference="dark">#2b2f45</color>
+    <color type="primary" scheme_preference="light">#ff8a3d</color>
+    <color type="primary" scheme_preference="dark">#d64f12</color>
   </branding>
 
   <!-- The launcher reads the user's files to index them, and remembers what has

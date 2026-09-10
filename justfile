@@ -25,12 +25,17 @@ autostart-dst := base-dir / 'share' / 'applications' / (appid + '.Autostart.desk
 systemd-dst := base-dir / 'lib' / 'systemd' / 'user' / (name + '.service')
 metainfo-dst := base-dir / 'share' / 'metainfo' / (appid + '.metainfo.xml')
 icons-dst := base-dir / 'share' / 'icons' / 'hicolor'
+icon-src := 'data' / 'icons' / 'hicolor' / 'scalable' / 'apps' / (appid + '.svg')
+icon-dst := icons-dst / 'scalable' / 'apps' / (appid + '.svg')
+icon-symbolic-src := 'data' / 'icons' / 'hicolor' / 'symbolic' / 'apps' / (appid + '-symbolic.svg')
+icon-symbolic-dst := icons-dst / 'symbolic' / 'apps' / (appid + '-symbolic.svg')
 license-dst := base-dir / 'share' / 'licenses' / name / 'LICENSE'
 
-# Icons ship one SVG per size rather than a single scalable file, matching what
-# every COSMIC application does — it lets the small sizes be drawn on the pixel
-# grid instead of being scaled down from a detailed drawing.
-icon-sizes := '16x16 24x24 32x32 48x48 64x64 128x128 256x256'
+# The scalable SVG covers toolkits that render it directly; the PNGs are
+# rasterised from it at each size so the panel and the icon grid get
+# pixel-exact art instead of a downscale of a detailed drawing. The symbolic
+# icon is what the applet asks the panel for.
+icon-sizes := '16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512'
 
 # Default recipe which runs `just build-release`
 default: build-release
@@ -119,9 +124,11 @@ install:
     install -Dm0644 data/systemd/jump.service {{systemd-dst}}
     install -Dm0644 data/metainfo/{{appid}}.metainfo.xml {{metainfo-dst}}
     install -Dm0644 LICENSE {{license-dst}}
+    install -Dm0644 {{icon-src}} {{icon-dst}}
+    install -Dm0644 {{icon-symbolic-src}} {{icon-symbolic-dst}}
     for size in {{icon-sizes}}; do \
-        install -Dm0644 "data/icons/hicolor/$size/apps/{{appid}}.svg" \
-            "{{icons-dst}}/$size/apps/{{appid}}.svg"; \
+        install -Dm0644 "data/icons/hicolor/$size/apps/{{appid}}.png" \
+            "{{icons-dst}}/$size/apps/{{appid}}.png"; \
     done
     # Both are caches; neither notices a new file on its own. Skipped when
     # staging into a package root, where the distro's hooks run them instead.
@@ -134,8 +141,9 @@ install:
 uninstall:
     rm -f {{bin-dst}} {{applet-dst}} {{settings-dst}} {{desktop-dst}} {{applet-desktop-dst}} \
           {{settings-desktop-dst}} {{autostart-dst}} {{systemd-dst}} {{metainfo-dst}} {{license-dst}}
+    rm -f {{icon-dst}} {{icon-symbolic-dst}}
     for size in {{icon-sizes}}; do \
-        rm -f "{{icons-dst}}/$size/apps/{{appid}}.svg"; \
+        rm -f "{{icons-dst}}/$size/apps/{{appid}}.png"; \
     done
 
 # Installs into the current user's home rather than the system
@@ -148,9 +156,11 @@ install-user:
     install -Dm0644 data/applications/{{appid}}Settings.desktop ~/.local/share/applications/{{appid}}Settings.desktop
     install -Dm0644 data/systemd/jump.service ~/.config/systemd/user/{{name}}.service
     install -Dm0644 data/metainfo/{{appid}}.metainfo.xml ~/.local/share/metainfo/{{appid}}.metainfo.xml
+    install -Dm0644 {{icon-src}} ~/.local/share/icons/hicolor/scalable/apps/{{appid}}.svg
+    install -Dm0644 {{icon-symbolic-src}} ~/.local/share/icons/hicolor/symbolic/apps/{{appid}}-symbolic.svg
     for size in {{icon-sizes}}; do \
-        install -Dm0644 "data/icons/hicolor/$size/apps/{{appid}}.svg" \
-            ~/.local/share/icons/hicolor/"$size"/apps/{{appid}}.svg; \
+        install -Dm0644 "data/icons/hicolor/$size/apps/{{appid}}.png" \
+            ~/.local/share/icons/hicolor/"$size"/apps/{{appid}}.png; \
     done
     update-desktop-database ~/.local/share/applications || true
     gtk-update-icon-cache -q -t ~/.local/share/icons/hicolor || true
@@ -170,6 +180,8 @@ uninstall-user:
           ~/.local/share/applications/{{appid}}Settings.desktop \
           ~/.config/systemd/user/{{name}}.service \
           ~/.local/share/metainfo/{{appid}}.metainfo.xml
+    rm -f ~/.local/share/icons/hicolor/scalable/apps/{{appid}}.svg \
+          ~/.local/share/icons/hicolor/symbolic/apps/{{appid}}-symbolic.svg
     for size in {{icon-sizes}}; do \
-        rm -f ~/.local/share/icons/hicolor/"$size"/apps/{{appid}}.svg; \
+        rm -f ~/.local/share/icons/hicolor/"$size"/apps/{{appid}}.png; \
     done
