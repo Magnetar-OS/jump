@@ -301,7 +301,7 @@ the long tail that separates "works" from "indistinguishable from first-party":
       Weblate expects
 - [x] justfile with `rootdir` / `prefix` / `cargo-target-dir`, vendoring for
       offline packaging builds
-- [x] `rust-toolchain.toml` agreeing with `rust-version` (1.98.0), plus
+- [x] `rust-toolchain.toml` agreeing with `rust-version` (1.98.1), plus
       `rustfmt.toml` (`imports_granularity = "Module"`)
 - [x] Sweep for hardcoded user-visible strings — found and fixed three, one
       of which was a real plural bug: the clipboard subtitle was built with

@@ -1,5 +1,5 @@
 # Must agree with `rust-version` in Cargo.toml — when they drift, cargo
 # refuses to build. CI takes its toolchain from this file.
 [toolchain]
-channel = "1.98.0"
+channel = "1.98.1"
 components = ["rustfmt", "clippy"]

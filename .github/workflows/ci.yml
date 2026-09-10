@@ -1,7 +1,7 @@
 # Continuous integration for every push and pull request.
 #
 # No toolchain action anywhere: rustup on the runner reads
-# rust-toolchain.toml, so the pinned 1.98.0 is what builds — the same
+# rust-toolchain.toml, so the pinned 1.98.1 is what builds — the same
 # toolchain a contributor gets locally.
 name: CI
 
