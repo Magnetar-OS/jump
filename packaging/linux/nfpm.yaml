@@ -45,6 +45,16 @@ contents:
   # Everything `just rootdir=.release-kit/pkgroot install` staged: binaries,
   # desktop entries, icons, metainfo, services — applets and daemons
   # included. Modes are preserved from the staging tree.
-  - src: .release-kit/pkgroot/
-    dst: /
+  #
+  # One tree per top-level directory, NOT a single tree at `/`: a tree whose
+  # dst is `/` makes nfpm emit a tar entry with an empty name, and bsdtar
+  # errors out on it ("Archive entry has empty or unreadable filename"), so
+  # `repo-add` rejects the Arch package as "not a package file" and the pacman
+  # repository never updates. The .deb and .rpm tolerate it, which is why this
+  # only ever shows up on Arch.
+  #
+  # This justfile installs under the prefix only. A new top-level directory in
+  # the install tree needs a new entry here.
+  - src: .release-kit/pkgroot/usr
+    dst: /usr
     type: tree
