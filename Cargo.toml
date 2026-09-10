@@ -20,6 +20,10 @@ rust-version.workspace = true
 repository.workspace = true
 license = "GPL-3.0-only"
 description = "A Spotlight-class launcher for COSMIC and GNOME"
+# Not on crates.io: this application links libcosmic by git, and the registry
+# refuses any crate that carries a git dependency. Jump ships as a distribution
+# package. Its toolkit-free half, jump-core, is published normally.
+publish = false
 
 [lib]
 name = "jump"
