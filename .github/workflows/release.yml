@@ -51,7 +51,16 @@ jobs:
       # needs a 256x256 PNG (kit README, icon input). Add 'appimage' here
       # plus the PNG when wanted.
       formats: 'deb,rpm,arch'
-    secrets: inherit
+    # Passed explicitly, NOT `secrets: inherit`: the kit lives in the
+    # entro314-labs organisation and this repository in Magnetar-OS, and
+    # `inherit` does not carry secrets across organisations — ARCH_REPO_TOKEN
+    # arrived empty, so the pacman job staged, validated and then skipped the
+    # push while still reporting success. Same fix as grabit's b1943aa.
+    secrets:
+      RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      LINUX_GPG_PRIVATE_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
+      LINUX_GPG_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
+      LINUX_GPG_KEY_ID: ${{ secrets.LINUX_GPG_KEY_ID }}
 
   # Self-hosted pacman repository — Arch installs/updates via pacman -Syu,
   # shared across all entro314-labs apps.
@@ -63,7 +72,12 @@ jobs:
       product_name: 'jump'
       repo_name: 'magnetar'
       pages_repo: 'Magnetar-OS/arch-repo'
-    secrets: inherit
+    secrets:
+      ARCH_REPO_TOKEN: ${{ secrets.ARCH_REPO_TOKEN }}
+      RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      LINUX_GPG_PRIVATE_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
+      LINUX_GPG_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
+      LINUX_GPG_KEY_ID: ${{ secrets.LINUX_GPG_KEY_ID }}
 
   # AUR listing. Validates on every release; publishes only when the
   # AUR_SSH_PRIVATE_KEY secret is set (the AUR is not accepting submissions
@@ -84,4 +98,6 @@ jobs:
       provides: 'jump'
       conflicts: 'jump'
       maintainer: 'Dominikos Pritis <dominikos.pritis@gmail.com>'
-    secrets: inherit
+    secrets:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+      RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}

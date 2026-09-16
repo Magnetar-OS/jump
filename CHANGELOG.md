@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- The Arch package is valid. The v1.0.0 pacman package carried a tar entry
+  with an empty name, so the repository refused it and Jump never reached
+  `pacman -S`. The package is now built one directory tree at a time.
+
 ## [0.1.0] - 2026-09-08
 
 ### Fixed
