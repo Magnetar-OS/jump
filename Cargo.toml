@@ -14,7 +14,7 @@ tracing = "0.1"
 
 [package]
 name = "jump"
-version = "1.0.0"
+version = "1.0.1"
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true

@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-16
+
 ### Fixed
 
 - The Arch package is valid. The v1.0.0 pacman package carried a tar entry
@@ -94,3 +96,7 @@ All notable changes to this project are documented here. The format follows
   (exported as environment variables to the action command) and stream
   updates with Alfred's `rerun` (re-query on an interval, clamped 0.5–5 s,
   while the query is on screen).
+
+[Unreleased]: https://github.com/Magnetar-OS/jump/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/Magnetar-OS/jump/compare/v0.1.0...v1.0.1
+[0.1.0]: https://github.com/Magnetar-OS/jump/releases/tag/v0.1.0
