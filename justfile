@@ -121,7 +121,9 @@ install:
     install -Dm0644 data/applications/{{appid}}Applet.desktop {{applet-desktop-dst}}
     install -Dm0644 data/applications/{{appid}}Settings.desktop {{settings-desktop-dst}}
     install -Dm0644 data/applications/{{appid}}.Autostart.desktop {{autostart-dst}}
-    install -Dm0644 data/systemd/jump.service {{systemd-dst}}
+    install -d {{ parent_directory(systemd-dst) }}
+    sed 's|@BINDIR@|{{ clean(prefix / 'bin') }}|' data/systemd/jump.service > {{systemd-dst}}
+    chmod 0644 {{systemd-dst}}
     install -Dm0644 data/metainfo/{{appid}}.metainfo.xml {{metainfo-dst}}
     install -Dm0644 LICENSE {{license-dst}}
     install -Dm0644 {{icon-src}} {{icon-dst}}
@@ -154,7 +156,8 @@ install-user:
     install -Dm0644 data/applications/{{appid}}.desktop ~/.local/share/applications/{{appid}}.desktop
     install -Dm0644 data/applications/{{appid}}Applet.desktop ~/.local/share/applications/{{appid}}Applet.desktop
     install -Dm0644 data/applications/{{appid}}Settings.desktop ~/.local/share/applications/{{appid}}Settings.desktop
-    install -Dm0644 data/systemd/jump.service ~/.config/systemd/user/{{name}}.service
+    install -d ~/.config/systemd/user
+    sed 's|@BINDIR@|%h/.local/bin|' data/systemd/jump.service > ~/.config/systemd/user/{{name}}.service
     install -Dm0644 data/metainfo/{{appid}}.metainfo.xml ~/.local/share/metainfo/{{appid}}.metainfo.xml
     install -Dm0644 {{icon-src}} ~/.local/share/icons/hicolor/scalable/apps/{{appid}}.svg
     install -Dm0644 {{icon-symbolic-src}} ~/.local/share/icons/hicolor/symbolic/apps/{{appid}}-symbolic.svg

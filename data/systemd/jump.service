@@ -8,7 +8,10 @@ After=graphical-session.target
 Type=simple
 # --daemon starts without mapping the overlay, so autostart does not flash the
 # launcher in the user's face at login.
-ExecStart=%h/.local/bin/jump --daemon
+# @BINDIR@ is filled in at install time: the system recipe writes the
+# prefix's bin directory, install-user writes %h/.local/bin. A literal
+# ~/.local path here once shipped in the package and started nothing.
+ExecStart=@BINDIR@/jump --daemon
 Restart=on-failure
 RestartSec=2
 Slice=session.slice
