@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Jump Settings is categorised as desktop settings rather than the bare
+  `Settings` category.
+
 ## [1.1.1] - 2026-09-22
 
 ### Changed

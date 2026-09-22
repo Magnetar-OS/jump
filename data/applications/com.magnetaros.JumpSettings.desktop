@@ -5,6 +5,6 @@ Comment=Configure the Jump launcher
 Exec=jump-settings
 Icon=com.magnetaros.Jump
 Terminal=false
-Categories=Settings;
+Categories=COSMIC;Settings;DesktopSettings;
 StartupNotify=true
 StartupWMClass=com.magnetaros.JumpSettings
