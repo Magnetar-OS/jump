@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Rebuilt against the current COSMIC libraries (libcosmic `03c8f93`). 1.1.0
+  was tagged but never released: its changelog section was missing, and the
+  release pipeline refused it.
+
 ## [1.0.2] - 2026-09-21
 
 ### Bug Fixes
