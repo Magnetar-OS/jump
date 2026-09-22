@@ -76,7 +76,7 @@
   </keywords>
 
   <releases>
-    <release version="1.1.0" date="2026-09-22"> <!-- x-release-kit-version-date -->
+    <release version="1.1.1" date="2026-09-22"> <!-- x-release-kit-version-date -->
       <description>
         <p>First release.</p>
       </description>
