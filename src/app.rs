@@ -20,7 +20,9 @@ use cosmic::iced::platform_specific::shell::commands::activation::request_token;
 use cosmic::iced::{Size, Subscription, event, keyboard, mouse, window};
 use cosmic::widget::{icon, text_input};
 use jump_core::{Content, Files, Frecency, Item, Launcher, PluginHost, Source};
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 
 use crate::apps::{self, App as AppEntry};
@@ -28,7 +30,7 @@ use crate::clipboard::{self, Clipboard, Entry};
 use crate::launch::Launch;
 use crate::toplevel::{self, Toplevels, Window};
 use crate::tray;
-use jump::config::Config;
+use jump::config::{Config, FileConfig};
 
 use crate::actions;
 use crate::anim::Panel;
@@ -101,9 +103,18 @@ pub enum Message {
     /// File-search results for `query`, which may already be stale.
     FileResults { query: String, items: Vec<Item> },
     /// The file index finished (re)building.
-    IndexReady(Files),
-    /// The content index is open and ready to query.
-    ContentReady(Arc<Mutex<Content>>),
+    IndexReady {
+        /// The file-search setup it was built for; see
+        /// [`App::index_generation`].
+        generation: u64,
+        files: Files,
+    },
+    /// The content index is open and ready to query. `stopped` is its
+    /// indexer's stop flag, which identifies the indexer it belongs to.
+    ContentReady {
+        content: Arc<Mutex<Content>>,
+        stopped: Arc<AtomicBool>,
+    },
     /// Full-text results for `query`, which may already be stale.
     ContentResults { query: String, items: Vec<Item> },
     /// The compositor's window list changed.
@@ -210,6 +221,11 @@ pub struct App {
     /// while queries read it — SQLite handles the concurrency, but the handle
     /// itself is not `Sync`.
     content: Option<Arc<Mutex<Content>>>,
+    /// Stops the running content indexer when dropped.
+    content_indexer: Option<IndexerStop>,
+    /// Bumped whenever the file-search settings change, so an index built for
+    /// the previous settings is recognised as stale when it arrives.
+    index_generation: u64,
     /// Clipboard history, newest first.
     clips: Vec<Entry>,
     /// What the most relevant player is playing, fetched when the overlay
@@ -709,7 +725,11 @@ impl App {
     /// Runs only after the path index exists, because the candidate list comes
     /// from it. Extraction is the expensive half of file search, so it is kept
     /// entirely off the interactive path and behind an explicit setting.
-    fn start_content_index(&self, files: Files) -> Task<Message> {
+    ///
+    /// Replaces any indexer already running: dropping its [`IndexerStop`]
+    /// stops that thread at its next chunk.
+    fn start_content_index(&mut self, files: Files) -> Task<Message> {
+        self.content_indexer = None;
         if !self.config.files.content {
             return Task::none();
         }
@@ -718,6 +738,9 @@ impl App {
         };
         let extensions = self.config.files.content_extensions.clone();
         let limits = self.config.files.content_limits();
+        let stop = IndexerStop::default();
+        let stopped = Arc::clone(&stop.0);
+        self.content_indexer = Some(stop);
 
         Task::future(async move {
             let configured = if extensions.is_empty() {
@@ -757,6 +780,7 @@ impl App {
             // contend for the index mutex a chunk at a time, which is the
             // intended and bounded cost.
             let background = Arc::clone(&content);
+            let thread_stop = Arc::clone(&stopped);
             let spawned = std::thread::Builder::new()
                 .name("jump-content-index".to_owned())
                 .spawn(move || {
@@ -776,32 +800,76 @@ impl App {
 
                     let candidates = runtime.block_on(files.content_candidates(&configured));
                     tracing::info!(candidates = candidates.len(), "indexing file contents");
-
-                    background.blocking_lock().prune_missing();
-
-                    // The lock is taken per chunk rather than for the whole
-                    // pass: holding it across 25 000 documents would block
-                    // every query behind the indexer.
-                    let started = Instant::now();
-                    let mut indexed = 0;
-                    for chunk in candidates.chunks(CONTENT_CHUNK) {
-                        indexed += background.blocking_lock().index(chunk);
-                        if background.blocking_lock().is_full() {
-                            break;
-                        }
-                    }
-                    tracing::info!(
-                        indexed,
-                        elapsed_ms = started.elapsed().as_millis(),
-                        "content indexing finished"
-                    );
+                    index_contents(&background, &candidates, &thread_stop);
                 });
             if let Err(error) = spawned {
                 tracing::warn!(%error, "could not start the content indexing thread");
             }
 
-            cosmic::action::app(Message::ContentReady(content))
+            cosmic::action::app(Message::ContentReady { content, stopped })
         })
+    }
+
+    /// Drop what content search (and, with `files`, file search) answered
+    /// for the query on screen, re-ranking only if that removed anything: a
+    /// list installed directly — a calculator answer, say — has no answers
+    /// to forget and must stay.
+    fn forget_answers(&mut self, files: bool) {
+        let mut removed = !self.arrived.content.is_empty();
+        self.arrived.content.clear();
+        if files {
+            removed |= !self.arrived.files.is_empty();
+            self.arrived.files.clear();
+        }
+        if removed {
+            self.rerank();
+        }
+    }
+
+    /// Build the file index for the current settings, then report it with
+    /// [`Message::IndexReady`]. `force` rebuilds even an index that is not
+    /// stale yet — after the set of indexed trees changed, say.
+    fn build_file_index(&self, force: bool) -> Task<Message> {
+        let Some(mut files) = Files::new(self.config.files.to_core()) else {
+            return Task::none();
+        };
+        let generation = self.index_generation;
+        Task::future(async move {
+            if force || files.needs_refresh() {
+                tracing::info!("rebuilding file index");
+                files.rebuild().await;
+            }
+            cosmic::action::app(Message::IndexReady { generation, files })
+        })
+    }
+
+    /// Bring file and content search in line with changed settings.
+    ///
+    /// Switching either off takes effect at once: the searcher is dropped,
+    /// rows it already contributed leave the list, and a running content
+    /// indexer stops at its next chunk rather than reading on in the
+    /// background.
+    fn apply_file_settings(&mut self, change: FilesChange) -> Task<Message> {
+        match change {
+            FilesChange::Unchanged => Task::none(),
+            FilesChange::Content => {
+                self.content = None;
+                self.forget_answers(false);
+                match self.files.clone() {
+                    Some(files) => self.start_content_index(files),
+                    None => Task::none(),
+                }
+            }
+            FilesChange::Index { rebuild } => {
+                // Anything still building for the old settings is stale.
+                self.index_generation += 1;
+                self.files = None;
+                self.content = None;
+                self.content_indexer = None;
+                self.forget_answers(true);
+                self.build_file_index(rebuild)
+            }
+        }
     }
 
     /// Show the overlay.
@@ -1248,6 +1316,8 @@ impl cosmic::Application for App {
             toplevels: None,
             files: None,
             content: None,
+            content_indexer: None,
+            index_generation: 0,
             clips: Vec::new(),
             now_playing: None,
             devices: Vec::new(),
@@ -1296,16 +1366,7 @@ impl cosmic::Application for App {
         // Index maintenance runs in the background. Building it takes seconds
         // for a home directory and minutes for an external drive, so it must
         // never be on the path between the keybind and the first frame.
-        let index = match Files::new(app.config.files.to_core()) {
-            Some(mut files) => Task::future(async move {
-                if files.needs_refresh() {
-                    tracing::info!("rebuilding file index");
-                    files.rebuild().await;
-                }
-                cosmic::action::app(Message::IndexReady(files))
-            }),
-            None => Task::none(),
-        };
+        let index = app.build_file_index(false);
 
         (app, Task::batch([open, index]))
     }
@@ -1441,7 +1502,11 @@ impl cosmic::Application for App {
                 Task::none()
             }
 
-            Message::IndexReady(files) => {
+            Message::IndexReady { generation, files } => {
+                if generation != self.index_generation {
+                    tracing::debug!("dropping an index built for earlier settings");
+                    return Task::none();
+                }
                 let ready = files.is_ready();
                 tracing::info!(ready, "file index available");
                 let content = self.start_content_index(files.clone());
@@ -1449,13 +1514,23 @@ impl cosmic::Application for App {
                 content
             }
 
-            Message::ContentReady(content) => {
-                self.content = Some(content);
+            Message::ContentReady { content, stopped } => {
+                // Only the current indexer's index: one that was replaced or
+                // switched off while it opened is not searched.
+                if self
+                    .content_indexer
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(&current.0, &stopped))
+                {
+                    self.content = Some(content);
+                }
                 Task::none()
             }
 
             Message::ContentResults { query, items } => {
-                if query != self.input {
+                // Content search switched off since this was asked: its
+                // answer must not reach the list.
+                if query != self.input || self.content.is_none() {
                     return Task::none();
                 }
                 self.arrived.content = items;
@@ -1465,8 +1540,9 @@ impl cosmic::Application for App {
 
             Message::FileResults { query, items } => {
                 // Same staleness rule as every other provider: a result set is
-                // only trusted while it still describes what the user has typed.
-                if query != self.input {
+                // only trusted while it still describes what the user has typed,
+                // and while file search is still on.
+                if query != self.input || self.files.is_none() {
                     return Task::none();
                 }
                 self.arrived.files = items;
@@ -1497,18 +1573,21 @@ impl cosmic::Application for App {
 
             Message::ConfigChanged(config) => {
                 // Applied live rather than at next start. Geometry and blur are
-                // derived from configuration on every frame, so the only thing
-                // that needs doing here is resending the blur region, which is
-                // compositor state rather than something the view can express.
-                let files_changed = config.files != self.config.files;
+                // derived from configuration on every frame, so beyond the
+                // plugin host, that leaves resending the blur region, which is
+                // compositor state rather than something the view can express,
+                // and rebuilding file and content search when their settings
+                // changed.
+                let files_change = FilesChange::between(&self.config.files, &config.files);
                 self.plugins
                     .set_disabled(config.disabled_plugins.iter().cloned());
                 self.plugins
                     .set_keyword_overrides(config.plugin_keywords.iter().cloned());
                 self.panel.set_reduced_motion(config.reduce_motion);
                 self.config = config;
-                tracing::info!(files_changed, "settings updated");
-                self.refresh_blur()
+                tracing::info!(?files_change, "settings updated");
+                let files = self.apply_file_settings(files_change);
+                Task::batch([self.refresh_blur(), files])
             }
 
             Message::Tray(action) => match action {
@@ -1531,14 +1610,11 @@ impl cosmic::Application for App {
                 }
 
                 tray::Action::RebuildIndex => {
-                    let Some(mut files) = self.files.clone() else {
+                    if self.files.is_none() {
                         return Task::none();
-                    };
-                    Task::future(async move {
-                        tracing::info!("rebuilding file index on request");
-                        files.rebuild().await;
-                        cosmic::action::app(Message::IndexReady(files))
-                    })
+                    }
+                    tracing::info!("rebuilding file index on request");
+                    self.build_file_index(true)
                 }
                 tray::Action::ClearClipboard => {
                     self.clips.clear();
@@ -2131,6 +2207,106 @@ fn emoji_items(needle: &str) -> Vec<Item> {
         .collect()
 }
 
+/// Stops a content indexer thread when dropped.
+///
+/// The thread checks the flag between chunks, so replacing or dropping the
+/// guard is how an indexing pass is cancelled: switching content search off,
+/// changing what it indexes, or rebuilding the file index it draws from.
+#[derive(Debug, Default)]
+struct IndexerStop(Arc<AtomicBool>);
+
+impl Drop for IndexerStop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Index `candidates` into `content` a chunk at a time, until done, full, or
+/// `stop` is raised. Returns how many documents were newly extracted.
+///
+/// The lock is taken per chunk rather than for the whole pass: holding it
+/// across 25 000 documents would block every query behind the indexer.
+fn index_contents(content: &Mutex<Content>, candidates: &[PathBuf], stop: &AtomicBool) -> usize {
+    let started = Instant::now();
+    let mut indexed = 0;
+    let mut stopped = stop.load(Ordering::Relaxed);
+    if !stopped {
+        content.blocking_lock().prune_missing();
+    }
+    for chunk in candidates.chunks(CONTENT_CHUNK) {
+        stopped = stop.load(Ordering::Relaxed);
+        if stopped {
+            break;
+        }
+        let mut index = content.blocking_lock();
+        indexed += index.index(chunk);
+        if index.is_full() {
+            break;
+        }
+    }
+    tracing::info!(
+        indexed,
+        stopped,
+        elapsed_ms = started.elapsed().as_millis(),
+        "content indexing finished"
+    );
+    indexed
+}
+
+/// How a settings change affects file and content search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FilesChange {
+    Unchanged,
+    /// Only content indexing changed; the file index stands.
+    Content,
+    /// The file searcher has to be rebuilt, and the index itself too when
+    /// `rebuild` — the set of indexed trees changed.
+    Index {
+        rebuild: bool,
+    },
+}
+
+impl FilesChange {
+    fn between(old: &FileConfig, new: &FileConfig) -> Self {
+        /// What is indexed.
+        fn scope(config: &FileConfig) -> (&[PathBuf], &[String], &[PathBuf], bool) {
+            (
+                &config.roots,
+                &config.ignore_names,
+                &config.ignore_paths,
+                config.external_drives,
+            )
+        }
+        /// How the index is searched and kept fresh.
+        fn searcher(config: &FileConfig) -> (bool, u64, &[String], &[String]) {
+            (
+                config.enabled,
+                config.refresh_hours,
+                &config.include_extensions,
+                &config.exclude_extensions,
+            )
+        }
+        /// What content indexing reads.
+        fn content(config: &FileConfig) -> (bool, &[String], u64, u64) {
+            (
+                config.content,
+                &config.content_extensions,
+                config.content_max_mb,
+                config.content_max_file_kb,
+            )
+        }
+        if scope(old) != scope(new) {
+            Self::Index { rebuild: true }
+        } else if searcher(old) != searcher(new) {
+            Self::Index { rebuild: false }
+        } else if content(old) != content(new) {
+            Self::Content
+        } else {
+            Self::Unchanged
+        }
+    }
+}
+
 /// What each asynchronous provider answered for one query, unranked.
 ///
 /// Providers answer at different times and every arrival re-ranks the list.
@@ -2346,6 +2522,68 @@ mod tests {
         keys.sort_unstable();
         keys.dedup();
         assert_eq!(keys.len(), total, "a row appeared twice");
+    }
+
+    #[test]
+    fn a_dropped_indexer_stops_before_reading_on() {
+        // Switching content search off drops the indexer's guard, and the
+        // thread must stop there rather than finish the pass it was on.
+        let root = tempfile::tempdir().expect("tempdir");
+        let candidates: Vec<_> = (0..3)
+            .map(|n| {
+                let path = root.path().join(format!("note-{n}.txt"));
+                std::fs::write(&path, "private words").expect("document");
+                path
+            })
+            .collect();
+        let open = || {
+            Mutex::new(
+                Content::open(
+                    &root.path().join("content.db"),
+                    vec!["txt".to_owned()],
+                    jump_core::content::Limits::default(),
+                )
+                .expect("content index"),
+            )
+        };
+
+        let running = IndexerStop::default();
+        let flag = Arc::clone(&running.0);
+        drop(running);
+        assert_eq!(index_contents(&open(), &candidates, &flag), 0);
+
+        let running = IndexerStop::default();
+        assert_eq!(index_contents(&open(), &candidates, &running.0), 3);
+    }
+
+    #[test]
+    fn file_settings_changes_are_classified_by_what_they_invalidate() {
+        let old = FileConfig::default();
+        let with = |change: fn(&mut FileConfig)| {
+            let mut new = old.clone();
+            change(&mut new);
+            FilesChange::between(&old, &new)
+        };
+
+        assert_eq!(FilesChange::between(&old, &old), FilesChange::Unchanged);
+        assert_eq!(with(|c| c.content = true), FilesChange::Content);
+        assert_eq!(with(|c| c.content_max_mb = 64), FilesChange::Content);
+        assert_eq!(
+            with(|c| c.enabled = false),
+            FilesChange::Index { rebuild: false }
+        );
+        assert_eq!(
+            with(|c| c.exclude_extensions = vec!["log".to_owned()]),
+            FilesChange::Index { rebuild: false }
+        );
+        assert_eq!(
+            with(|c| c.roots = vec!["/data".into()]),
+            FilesChange::Index { rebuild: true }
+        );
+        assert_eq!(
+            with(|c| c.external_drives = true),
+            FilesChange::Index { rebuild: true }
+        );
     }
 
     #[test]

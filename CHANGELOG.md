@@ -36,6 +36,12 @@ All notable changes to this project are documented here. The format follows
   restarting it, as `jump plugin new` and the plugin guide always promised:
   the launcher and Jump Settings watch the plugin directories, and an open
   query is re-run when the plugin set changes.
+- File and content search settings apply live, as Settings says they do.
+  Switching "Search inside files" off stops the content indexer at its next
+  chunk and stops querying the index at once; changing the indexed folders
+  rebuilds the file index; and the rows either search had already put on
+  screen leave it. Rebuilding the file index from the tray menu no longer
+  starts a second content indexer alongside the first.
 
 ## [1.1.1] - 2026-09-22
 
