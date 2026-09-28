@@ -1046,33 +1046,41 @@ impl App {
             return Task::none();
         };
         tracing::debug!(index, key = %item.key, "activating");
+        let key = item.key.clone();
+        let (source, id) = (item.source.clone(), item.id);
 
-        self.frecency.record(&item.key);
+        // Counted as a use only once something acted on it: a plugin switched
+        // off mid-query, a launcher bridge that is down, or no clipboard
+        // backend leaves nothing done, and ranking must not learn from that.
+        let Some(task) = self.dispatch(&source, id) else {
+            tracing::warn!(%key, "nothing could act on this result; not counted as a use");
+            return self.dismiss();
+        };
+        self.frecency.record(&key);
+        task
+    }
 
+    /// Act on a search result's `source` and begin dismissing. `None` when
+    /// nothing could act on it, before anything was dismissed.
+    fn dispatch(&mut self, source: &Source, id: jump_core::Indice) -> Option<Task<Message>> {
         // Activating a launcher result leaves a request in flight, and the
         // answer is what tells us to start the application. Everything else
         // acts here and now.
         let mut release = Release::Service;
 
-        match &item.source {
+        match source {
             Source::Launcher => {
-                if let Some(launcher) = self.launcher.as_ref() {
-                    launcher.activate(item.id);
-                    release = Release::Nothing;
-                }
+                self.launcher.as_ref()?.activate(id);
+                release = Release::Nothing;
             }
             Source::Window { identifier } => {
-                if let Some(toplevels) = self.toplevels.as_ref() {
-                    toplevels.activate(identifier);
-                }
+                self.toplevels.as_ref()?.activate(identifier);
             }
             Source::File { path } => {
                 jump_core::files::open(path);
             }
             Source::Clipboard { text } => {
-                if let Some(clipboard) = self.clipboard.as_ref() {
-                    clipboard.copy(text);
-                }
+                self.clipboard.as_ref()?.copy(text);
             }
             Source::Plugin {
                 plugin,
@@ -1080,9 +1088,7 @@ impl App {
                 variables,
                 ..
             } => {
-                if let Some(plugin) = self.plugins.get(plugin) {
-                    plugin.activate(arg, variables);
-                }
+                self.plugins.get(plugin)?.activate(arg, variables);
             }
             Source::Process { pid } => {
                 jump_core::process::terminate(*pid, false);
@@ -1091,35 +1097,34 @@ impl App {
                 jump_core::web::open(url);
             }
             Source::Emoji { emoji } => {
-                if let Some(clipboard) = self.clipboard.as_ref() {
-                    clipboard.copy(emoji);
-                }
+                self.clipboard.as_ref()?.copy(emoji);
             }
             Source::Calc { answer } => {
                 // The answer is already on screen; what is left to do with it
                 // is take it somewhere else.
-                if let Some(clipboard) = self.clipboard.as_ref() {
-                    clipboard.copy(answer);
-                }
+                self.clipboard.as_ref()?.copy(answer);
             }
-            Source::System { id } => match system::run(id) {
-                Some(system::Outcome::Launch(launch)) => {
+            Source::System { id } => match system::run(id)? {
+                system::Outcome::Launch(launch) => {
                     // A program launch goes through the same activation-token
                     // path as everything else.
-                    return Task::batch([self.spawn(launch), self.dismiss_with(release)]);
+                    return Some(Task::batch([
+                        self.spawn(launch),
+                        self.dismiss_with(release),
+                    ]));
                 }
-                Some(system::Outcome::Background(task)) => {
+                system::Outcome::Background(task) => {
                     // A bus round trip must not run on the frame; dismiss now
                     // and let the call finish behind the fade-out.
-                    return Task::batch([
+                    return Some(Task::batch([
                         Task::future(async move {
                             system::run_background(task).await;
                             cosmic::action::app(Message::None)
                         }),
                         self.dismiss_with(release),
-                    ]);
+                    ]));
                 }
-                Some(system::Outcome::Done) | None => {}
+                system::Outcome::Done => {}
             },
         }
 
@@ -1127,7 +1132,7 @@ impl App {
         // Waiting would leave the panel visibly hanging over the window that is
         // about to appear; the activation token is what makes that window take
         // focus, not our still being on screen.
-        self.dismiss_with(release)
+        Some(self.dismiss_with(release))
     }
 
     /// One line saying why `item` sits where it does — the frecency

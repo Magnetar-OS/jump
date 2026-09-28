@@ -57,6 +57,9 @@ All notable changes to this project are documented here. The format follows
   Settings removes the allowance. `jump plugin import` no longer writes
   `timeout_ms = 3000` for keywordless filters, and `jump plugin lint` says
   why a keywordless `timeout_ms` is clamped.
+- Activating a result that nothing can act on any more — a plugin switched
+  off since the query, the launcher service down, no clipboard backend — no
+  longer counts as a use for ranking, and is logged.
 
 ## [1.1.1] - 2026-09-22
 
