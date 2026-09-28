@@ -27,6 +27,11 @@ All notable changes to this project are documented here. The format follows
 - Changing a setting in Jump Settings no longer undoes a result pinned in the
   launcher, or a key edited by hand, since the window opened: it writes only
   the setting that changed, and follows changes made elsewhere.
+- `jump plugin import` writes nothing unless the import succeeds: a filter
+  that cannot be converted leaves no half-written directory, a name collision
+  is detected before anything is written, and two filters sharing a keyword
+  both import. A workflow can no longer make the importer read a script or
+  icon from outside the bundle (`../`, absolute paths, symlinks, devices).
 
 ## [1.1.1] - 2026-09-22
 

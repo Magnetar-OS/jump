@@ -73,10 +73,7 @@ pub fn import(workflow: &Path, destination_root: &Path) -> Result<Import, Error>
         (extracted.path().to_path_buf(), Some(extracted))
     };
 
-    let manifest_path = source.join("info.plist");
-    if !manifest_path.is_file() {
-        return Err(Error::NotAWorkflow);
-    }
+    let manifest_path = bundle_file(&source, "info.plist").ok_or(Error::NotAWorkflow)?;
     let info = Value::from_file(&manifest_path)?;
 
     let workflow_name = string_key(&info, "name").unwrap_or_else(|| "Imported workflow".into());
@@ -123,43 +120,166 @@ pub fn import(workflow: &Path, destination_root: &Path) -> Result<Import, Error>
     let mut filters = filters;
     filters.sort_by(|a, b| a.0.cmp(b.0));
 
-    for (uid, filter) in filters {
+    let planned = plan(
+        filters,
+        destination_root,
+        &workflow_name,
+        &mut import.warnings,
+    )?;
+
+    // Each plugin is built in a private staging directory beside its
+    // destination and moved into place only once every filter has been
+    // converted, so a filter that fails half-way — or an import that fails
+    // as a whole — leaves nothing behind in the plugin root.
+    std::fs::create_dir_all(destination_root)?;
+    let mut staged = Vec::new();
+    for (uid, filter, keyword, directory) in planned {
+        let staging = tempfile::Builder::new()
+            .prefix(".jump-import-")
+            .tempdir_in(destination_root)?;
         match convert_filter(
             uid,
             filter,
+            keyword,
             &objects,
             connections,
             &source,
-            destination_root,
+            staging.path(),
+            &directory,
             &workflow_name,
             &workflow_description,
             &mut import.warnings,
         ) {
-            Ok(imported) => import.plugins.push(imported),
-            // A directory collision aborts the whole import: partial output
-            // plus an error is the worst of both worlds.
-            Err(error @ Error::AlreadyExists(_)) => return Err(error),
+            Ok(imported) => staged.push((staging, imported)),
             Err(error) => import
                 .warnings
                 .push(format!("script filter {uid} skipped: {error}")),
         }
     }
 
-    if import.plugins.is_empty() {
+    if staged.is_empty() {
         return Err(Error::NoScriptFilters);
+    }
+    for (staging, imported) in staged {
+        std::fs::rename(staging.path(), &imported.directory)?;
+        // Moved, so there is nothing left for the guard to remove.
+        let _ = staging.keep();
+        import.plugins.push(imported);
     }
     Ok(import)
 }
 
-/// Convert one script filter and its primary connection.
+/// A script filter and the plugin directory it will become.
+type Planned<'a> = (&'a String, &'a plist::Dictionary, Option<String>, PathBuf);
+
+/// Decide every filter's destination, before anything is written.
+///
+/// A collision with an existing directory aborts the whole import: partial
+/// output plus an error is the worst of both worlds. Two filters of one
+/// workflow landing on the same name — a shared keyword, or two untitled
+/// keywordless filters — are both kept, the later one numbered.
+fn plan<'a>(
+    filters: Vec<(&'a String, &&'a plist::Dictionary)>,
+    destination_root: &Path,
+    workflow_name: &str,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<Planned<'a>>, Error> {
+    let mut planned: Vec<Planned<'a>> = Vec::new();
+    for (uid, filter) in filters {
+        let keyword = filter_keyword(filter, warnings);
+        let title = filter_title(filter, workflow_name);
+        // The keyword comes straight out of an untrusted plist, so only its
+        // slug names the directory — `../../.config/...` must not write
+        // outside the plugin root. The manifest keeps the declared text.
+        let base = slugify(keyword.as_deref().unwrap_or(&title));
+        let mut slug = base.clone();
+        let mut suffix = 2;
+        while planned
+            .iter()
+            .any(|(_, _, _, directory)| *directory == destination_root.join(&slug))
+        {
+            slug = format!("{base}-{suffix}");
+            suffix += 1;
+        }
+        let directory = destination_root.join(&slug);
+        // Belt and braces: slugify leaves no separators, but a landing spot
+        // outside the root would be a write primitive, so it is checked, not
+        // assumed.
+        if !directory.starts_with(destination_root) {
+            return Err(Error::Io(std::io::Error::other(
+                "refusing to import outside the plugin directory",
+            )));
+        }
+        if directory.exists() {
+            return Err(Error::AlreadyExists(directory));
+        }
+        planned.push((uid, *filter, keyword, directory));
+    }
+    Ok(planned)
+}
+
+/// The filter's keyword, or `None` for an always-on filter.
+fn filter_keyword(filter: &plist::Dictionary, warnings: &mut Vec<String>) -> Option<String> {
+    let keyword = filter
+        .get("config")
+        .and_then(Value::as_dictionary)
+        .and_then(|config| config.get("keyword"))
+        .and_then(Value::as_string)
+        .map(str::trim)
+        .filter(|keyword| !keyword.is_empty())
+        .map(ToOwned::to_owned);
+
+    // Alfred allows `{var:…}` templates in keywords; jump keywords are
+    // literal. The plugin still imports — as an always-on plugin — but the
+    // difference is worth a warning.
+    match keyword {
+        Some(keyword) if keyword.contains('{') => {
+            warnings.push(format!(
+                "keyword {keyword:?} is templated; imported without a keyword — set one in \
+                 manifest.toml"
+            ));
+            None
+        }
+        other => other,
+    }
+}
+
+/// The filter's own title, else the workflow's name.
+fn filter_title(filter: &plist::Dictionary, workflow_name: &str) -> String {
+    filter
+        .get("title")
+        .and_then(Value::as_string)
+        .filter(|title| !title.is_empty())
+        .unwrap_or(workflow_name)
+        .to_owned()
+}
+
+/// `relative` inside the bundle at `source`, when it names a regular file
+/// that is really there.
+///
+/// Every path an untrusted plist names goes through here. Resolving first
+/// means `../`, an absolute path and a symlink out of the bundle are all the
+/// same refused read, and requiring a regular file keeps `/dev/zero` or a
+/// FIFO from turning an import into an endless read.
+fn bundle_file(source: &Path, relative: &str) -> Option<PathBuf> {
+    let root = source.canonicalize().ok()?;
+    let path = source.join(relative).canonicalize().ok()?;
+    (path.starts_with(&root) && path.is_file()).then_some(path)
+}
+
+/// Convert one script filter and its primary connection, writing the plugin
+/// into `staging`. `directory` is where it will live once moved into place,
+/// which is what the manifest's absolute icon path has to name.
 #[allow(clippy::too_many_arguments)]
 fn convert_filter(
     uid: &str,
     filter: &plist::Dictionary,
+    keyword: Option<String>,
     objects: &HashMap<String, &plist::Dictionary>,
     connections: Option<&plist::Dictionary>,
     source: &Path,
-    destination_root: &Path,
+    staging: &Path,
+    directory: &Path,
     workflow_name: &str,
     workflow_description: &str,
     warnings: &mut Vec<String>,
@@ -170,56 +290,10 @@ fn convert_filter(
         .cloned()
         .unwrap_or_default();
 
-    let keyword = config
-        .get("keyword")
-        .and_then(Value::as_string)
-        .map(str::trim)
-        .filter(|keyword| !keyword.is_empty())
-        .map(ToOwned::to_owned);
-
-    // Alfred allows `{var:…}` templates in keywords; jump keywords are
-    // literal. The plugin still imports — as an always-on plugin — but the
-    // difference is worth a warning.
-    let keyword = match keyword {
-        Some(keyword) if keyword.contains('{') => {
-            warnings.push(format!(
-                "keyword {keyword:?} is templated; imported without a keyword — set one in \
-                 manifest.toml"
-            ));
-            None
-        }
-        other => other,
-    };
-
-    let title = filter
-        .get("title")
-        .and_then(Value::as_string)
-        .filter(|title| !title.is_empty())
-        .unwrap_or(workflow_name)
-        .to_owned();
-
-    // The slug becomes a directory name and the keyword comes straight out of
-    // an untrusted plist, so it is sanitised exactly like the title fallback —
-    // a workflow declaring keyword `../../.config/...` must not write outside
-    // the plugin root. The manifest keyword keeps the declared text; only the
-    // path is constrained.
-    let slug = slugify(keyword.as_deref().unwrap_or(&title));
-    let directory = destination_root.join(&slug);
-    // Belt and braces: slugify leaves no separators, but a landing spot
-    // outside the root would be a write primitive, so it is checked, not
-    // assumed.
-    if !directory.starts_with(destination_root) {
-        return Err(Error::Io(std::io::Error::other(
-            "refusing to import outside the plugin directory",
-        )));
-    }
-    if directory.exists() {
-        return Err(Error::AlreadyExists(directory));
-    }
+    let title = filter_title(filter, workflow_name);
 
     let query = script_from(&config, source)?;
-    std::fs::create_dir_all(&directory)?;
-    let query_file = write_script(&directory, "search", &query)?;
+    let query_file = write_script(staging, "search", &query)?;
 
     // The object this filter feeds is the activation.
     let activate = connections
@@ -250,7 +324,7 @@ fn convert_filter(
                 .map(ToOwned::to_owned)
         })
         .and_then(|destination| objects.get(&destination))
-        .and_then(|action| convert_action(action, source, &directory, warnings).transpose())
+        .and_then(|action| convert_action(action, source, staging, warnings).transpose())
         .transpose()?;
 
     // Alfred workflows were written with no deadline at all; give them the
@@ -267,15 +341,15 @@ fn convert_filter(
     if let Some(activate) = &activate {
         let _ = writeln!(manifest, "activate = \"./{activate}\"");
     }
-    if let Some(icon) = copy_icon(uid, source, &directory)? {
+    if let Some(icon) = copy_icon(uid, source, staging, directory)? {
         let _ = writeln!(manifest, "icon = \"{}\"", toml_escape(&icon));
     }
     manifest.push_str("# Imported from Alfred, which has no query deadline; tune down once\n");
     manifest.push_str("# you know how fast it answers.\ntimeout_ms = 3000\n");
-    std::fs::write(directory.join("manifest.toml"), manifest)?;
+    std::fs::write(staging.join("manifest.toml"), manifest)?;
 
     Ok(Imported {
-        directory,
+        directory: directory.to_path_buf(),
         name: title,
         keyword,
     })
@@ -289,7 +363,12 @@ fn script_from(config: &plist::Dictionary, source: &Path) -> Result<String, Erro
         .and_then(Value::as_string)
         .filter(|file| !file.is_empty())
     {
-        let text = std::fs::read_to_string(source.join(file))?;
+        let path = bundle_file(source, file).ok_or_else(|| {
+            Error::Io(std::io::Error::other(format!(
+                "script file {file:?} is not a file inside the workflow"
+            )))
+        })?;
+        let text = std::fs::read_to_string(path)?;
         return Ok(rewrite_query_placeholder(&text, argv_style(config)));
     }
 
@@ -424,16 +503,20 @@ fn write_script(directory: &Path, name: &str, contents: &str) -> Result<String, 
     Ok(name.to_owned())
 }
 
-/// Carry the icon over: the filter's own (`<uid>.png`) wins over the
-/// workflow's (`icon.png`). Returns the absolute destination path for the
-/// manifest, which resolves regardless of the launcher's working directory.
-fn copy_icon(uid: &str, source: &Path, directory: &Path) -> Result<Option<String>, Error> {
+/// Carry the icon over into `staging`: the filter's own (`<uid>.png`) wins
+/// over the workflow's (`icon.png`). Returns the absolute path the icon will
+/// have once the plugin is in `directory`, which resolves regardless of the
+/// launcher's working directory.
+fn copy_icon(
+    uid: &str,
+    source: &Path,
+    staging: &Path,
+    directory: &Path,
+) -> Result<Option<String>, Error> {
     for candidate in [format!("{uid}.png"), "icon.png".to_owned()] {
-        let icon = source.join(&candidate);
-        if icon.is_file() {
-            let destination = directory.join("icon.png");
-            std::fs::copy(&icon, &destination)?;
-            return Ok(Some(destination.display().to_string()));
+        if let Some(icon) = bundle_file(source, &candidate) {
+            std::fs::copy(&icon, staging.join("icon.png"))?;
+            return Ok(Some(directory.join("icon.png").display().to_string()));
         }
     }
     Ok(None)
@@ -661,6 +744,132 @@ mod tests {
             import(&workflow, &plugins),
             Err(Error::NoScriptFilters)
         ));
+    }
+
+    /// [`FIXTURE`] plus a second, unconnected script filter with `keyword`.
+    fn with_second_filter(keyword: &str) -> String {
+        FIXTURE.replace(
+            "  </array>\n  <key>connections</key>",
+            &format!(
+                "    <dict>
+      <key>type</key><string>alfred.workflow.input.scriptfilter</string>
+      <key>uid</key><string>filter-2</string>
+      <key>config</key><dict>
+        <key>keyword</key><string>{keyword}</string>
+        <key>type</key><integer>0</integer>
+        <key>script</key><string>echo '{{\"items\":[]}}'</string>
+      </dict>
+    </dict>
+  </array>
+  <key>connections</key>"
+            ),
+        )
+    }
+
+    fn entries(directory: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(directory)
+            .expect("read dir")
+            .map(|entry| {
+                entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_collision_aborts_before_anything_is_written() {
+        let (_root, workflow, plugins) = workspace();
+        std::fs::write(workflow.join("info.plist"), with_second_filter("other")).expect("fixture");
+        std::fs::create_dir_all(plugins.join("other")).expect("existing plugin");
+
+        assert!(matches!(
+            import(&workflow, &plugins),
+            Err(Error::AlreadyExists(_))
+        ));
+        // filter-1 sorts first; it must not have been written either.
+        assert_eq!(entries(&plugins), ["other"]);
+    }
+
+    #[test]
+    fn filters_sharing_a_keyword_both_import() {
+        let (_root, workflow, plugins) = workspace();
+        std::fs::write(workflow.join("info.plist"), with_second_filter("gh")).expect("fixture");
+
+        let import = import(&workflow, &plugins).expect("import succeeds");
+        assert_eq!(import.plugins.len(), 2);
+        assert_eq!(entries(&plugins), ["gh", "gh-2"]);
+        // Both keep the keyword the workflow declared; only the directory
+        // name had to differ.
+        assert!(
+            import
+                .plugins
+                .iter()
+                .all(|plugin| plugin.keyword.as_deref() == Some("gh"))
+        );
+    }
+
+    #[test]
+    fn a_skipped_filter_leaves_nothing_behind() {
+        let (_root, workflow, plugins) = workspace();
+        // The filter converts, but the Run Script it feeds is AppleScript.
+        let fixture = FIXTURE
+            .replace(
+                "alfred.workflow.action.openurl",
+                "alfred.workflow.action.script",
+            )
+            .replace(
+                "<key>url</key><string>https://github.com/search?q={query}</string>",
+                "<key>type</key><integer>6</integer><key>script</key><string>x</string>",
+            );
+        std::fs::write(workflow.join("info.plist"), fixture).expect("fixture");
+
+        assert!(matches!(
+            import(&workflow, &plugins),
+            Err(Error::NoScriptFilters)
+        ));
+        assert!(entries(&plugins).is_empty(), "{:?}", entries(&plugins));
+    }
+
+    #[test]
+    fn a_scriptfile_outside_the_bundle_is_never_read() {
+        let (root, workflow, plugins) = workspace();
+        let secret = root.path().join("secret");
+        std::fs::write(&secret, "not for the plugin").expect("secret");
+        let fixture = FIXTURE.replace(
+            "<key>scriptargtype</key>",
+            &format!(
+                "<key>scriptfile</key><string>{}</string><key>scriptargtype</key>",
+                secret.display()
+            ),
+        );
+        std::fs::write(workflow.join("info.plist"), &fixture).expect("fixture");
+        assert!(matches!(
+            import(&workflow, &plugins),
+            Err(Error::NoScriptFilters)
+        ));
+
+        // A relative escape and a symlink out of the bundle are the same
+        // read by another spelling.
+        let relative = fixture.replace(&secret.display().to_string(), "../secret");
+        std::fs::write(workflow.join("info.plist"), relative).expect("fixture");
+        assert!(matches!(
+            import(&workflow, &plugins),
+            Err(Error::NoScriptFilters)
+        ));
+        std::os::unix::fs::symlink(&secret, workflow.join("link.sh")).expect("symlink");
+        let linked = fixture.replace(&secret.display().to_string(), "link.sh");
+        std::fs::write(workflow.join("info.plist"), linked).expect("fixture");
+        assert!(matches!(
+            import(&workflow, &plugins),
+            Err(Error::NoScriptFilters)
+        ));
+
+        assert!(entries(&plugins).is_empty());
     }
 
     #[test]
