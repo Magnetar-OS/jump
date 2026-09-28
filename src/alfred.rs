@@ -454,8 +454,6 @@ fn convert_filter(
         .and_then(|action| convert_action(action, bundle, staging, warnings).transpose())
         .transpose()?;
 
-    // Alfred workflows were written with no deadline at all; give them the
-    // ceiling rather than the 180 ms interactive default.
     let mut manifest = format!(
         "name = \"{}\"\ndescription = \"{}\"\n",
         toml_escape(&title),
@@ -471,8 +469,17 @@ fn convert_filter(
     if let Some(icon) = copy_icon(uid, bundle, staging, directory)? {
         let _ = writeln!(manifest, "icon = \"{}\"", toml_escape(&icon));
     }
-    manifest.push_str("# Imported from Alfred, which has no query deadline; tune down once\n");
-    manifest.push_str("# you know how fast it answers.\ntimeout_ms = 3000\n");
+    // Alfred workflows were written with no deadline at all, so a keyworded
+    // filter gets the ceiling rather than the 180 ms interactive default. An
+    // always-on one cannot: it runs on every keystroke, and the host holds
+    // it to the default whatever the manifest says.
+    if keyword.is_some() {
+        manifest.push_str("# Imported from Alfred, which has no query deadline; tune down once\n");
+        manifest.push_str("# you know how fast it answers.\ntimeout_ms = 3000\n");
+    } else {
+        manifest.push_str("# No keyword, so this runs on every keystroke and must answer within\n");
+        manifest.push_str("# 180 ms. Give it a keyword to allow a timeout_ms of up to 3000.\n");
+    }
     std::fs::write(staging.join("manifest.toml"), manifest)?;
 
     Ok(Imported {
@@ -788,6 +795,22 @@ mod tests {
                 .iter()
                 .any(|warning| warning.contains("modifier connections"))
         );
+    }
+
+    #[test]
+    fn an_always_on_filter_keeps_the_interactive_deadline() {
+        let (_root, workflow, plugins) = workspace();
+        let fixture = FIXTURE.replace("<key>keyword</key><string>gh</string>", "");
+        std::fs::write(workflow.join("info.plist"), fixture).expect("fixture");
+
+        let import = import(&workflow, &plugins).expect("import succeeds");
+        let plugin = &import.plugins[0];
+        assert_eq!(plugin.keyword, None);
+        let manifest: jump_core::plugin::Manifest = toml::from_str(
+            &std::fs::read_to_string(plugin.directory.join("manifest.toml")).expect("manifest"),
+        )
+        .expect("manifest parses");
+        assert_eq!(manifest.timeout_ms, None);
     }
 
     #[test]

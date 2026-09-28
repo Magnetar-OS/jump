@@ -284,9 +284,11 @@ A keyworded plugin takes the query over entirely: typing `gh jump` addresses
 that plugin and app results are suppressed. The keyword must be followed by a
 space or end the query, so `ghost` is not read as `gh` + `ost`.
 
-Plugins are held to a **180 ms** deadline and run concurrently. A plugin that
-overruns is killed and its results dropped — a broken plugin degrades its own
-results and nothing else. Network-backed plugins are expected to cache.
+Plugins are held to a **180 ms** deadline and run concurrently. A keyworded
+plugin may raise its own with `timeout_ms`, up to 3 s; one without a keyword
+runs on every keystroke and cannot. A plugin that overruns is killed and its
+results dropped — a broken plugin degrades its own results and nothing else.
+Network-backed plugins are expected to cache.
 
 A working example lives in [`examples/plugins/demo/`](examples/plugins/demo/).
 Copy it to `~/.local/share/jump/plugins/demo/` and type `demo hello`.

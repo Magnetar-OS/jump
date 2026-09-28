@@ -50,6 +50,13 @@ All notable changes to this project are documented here. The format follows
   content search running to completion or their deadline: each keystroke
   cancels the work the previous one started, and a cancelled plugin is
   killed with its process group.
+- A plugin without a keyword — which runs on every keystroke — is held to the
+  180 ms interactive deadline even if its manifest sets `timeout_ms`; only a
+  keyworded plugin may take up to 3 s, as documented. The deadline follows
+  the keyword the plugin currently answers to, so removing its keyword in
+  Settings removes the allowance. `jump plugin import` no longer writes
+  `timeout_ms = 3000` for keywordless filters, and `jump plugin lint` says
+  why a keywordless `timeout_ms` is clamped.
 
 ## [1.1.1] - 2026-09-22
 

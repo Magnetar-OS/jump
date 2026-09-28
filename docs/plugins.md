@@ -31,8 +31,8 @@ nothing sandboxes it, and `jump` cannot make it safe.
 
 What `jump` does enforce is blast radius, not intent:
 
-- a plugin that overruns its deadline (180 ms, or its own `timeout_ms` up to
-  3 s) is killed with its whole process group — everything it started,
+- a plugin that overruns its deadline (180 ms, or for a keyworded plugin its
+  own `timeout_ms` up to 3 s) is killed with its whole process group — everything it started,
   short of a process that deliberately detaches with `setsid` — and its
   results dropped;
 - a plugin that prints more than 1 MiB is cut off there and killed the same

@@ -39,10 +39,10 @@
 //! ## Isolation
 //!
 //! A plugin is an arbitrary program on the interactive path, so it is held to a
-//! hard deadline. Exceeding it (180 ms by default, raised per plugin with
-//! `timeout_ms`) kills the process and drops its
-//! results rather than delaying the frame — a broken plugin degrades its own
-//! results and nothing else.
+//! hard deadline. Exceeding it (180 ms by default, raised for a keyworded
+//! plugin with `timeout_ms`) kills the process and drops its results rather
+//! than delaying the frame — a broken plugin degrades its own results and
+//! nothing else.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -227,17 +227,30 @@ pub struct Manifest {
     #[serde(default)]
     pub icon: Option<String>,
     /// Query deadline override in milliseconds, clamped to a hard ceiling.
+    /// Only a keyworded plugin may raise it past the interactive default.
     #[serde(default)]
     pub timeout_ms: Option<u64>,
 }
 
 impl Manifest {
-    /// The deadline this plugin's query command runs under.
+    /// The deadline this plugin's query command runs under while it answers
+    /// to `keyword` — the effective one, which a user override may have
+    /// added or removed.
+    ///
+    /// `timeout_ms` is clamped to 50 ms–3 s, and without a keyword it can
+    /// only lower the interactive default: an always-on plugin runs on every
+    /// keystroke, and letting it hold a process for seconds each time is
+    /// exactly what the default exists to prevent.
     #[must_use]
-    pub fn timeout(&self) -> Duration {
-        self.timeout_ms.map_or(QUERY_TIMEOUT, |ms| {
+    pub fn timeout(&self, keyword: Option<&str>) -> Duration {
+        let requested = self.timeout_ms.map_or(QUERY_TIMEOUT, |ms| {
             Duration::from_millis(ms).clamp(Duration::from_millis(50), MAX_QUERY_TIMEOUT)
-        })
+        });
+        if keyword.is_some() {
+            requested
+        } else {
+            requested.min(QUERY_TIMEOUT)
+        }
     }
 }
 
@@ -419,13 +432,12 @@ impl Plugin {
         self.match_query_as(self.manifest.keyword.as_deref(), query)
     }
 
-    /// Run the plugin's query command and parse its results, plus the rerun
-    /// interval it asked for, if any.
-    async fn query(&self, text: &str) -> (Vec<Item>, Option<Duration>) {
+    /// Run the plugin's query command under `deadline` and parse its
+    /// results, plus the rerun interval it asked for, if any.
+    async fn query(&self, text: &str, deadline: Duration) -> (Vec<Item>, Option<Duration>) {
         let program = self.resolve(&self.manifest.query);
 
-        let stdout = match run_query(&program, &self.directory, text, self.manifest.timeout()).await
-        {
+        let stdout = match run_query(&program, &self.directory, text, deadline).await {
             Ok(stdout) => stdout,
             Err(error) => {
                 tracing::warn!(plugin = %self.id, ?program, %error, "plugin query dropped");
@@ -790,9 +802,10 @@ impl PluginHost {
             keyworded
         };
 
-        let futures = selected
-            .into_iter()
-            .map(|(plugin, query)| plugin.query(query));
+        let futures = selected.into_iter().map(|(plugin, query)| {
+            let deadline = plugin.manifest.timeout(self.effective_keyword(plugin));
+            plugin.query(query, deadline)
+        });
 
         let mut results = QueryResults::default();
         for (items, rerun) in futures::future::join_all(futures).await {
@@ -885,11 +898,16 @@ pub async fn lint(directory: &Path, sample_query: &str) -> LintReport {
     }
 
     if let Some(ms) = manifest.timeout_ms {
-        let clamped = manifest.timeout().as_millis();
-        if u128::from(ms) != clamped {
+        let applied = manifest.timeout(manifest.keyword.as_deref()).as_millis();
+        if u128::from(ms) != applied {
+            let why = if manifest.keyword.is_none() && applied == QUERY_TIMEOUT.as_millis() {
+                " — only a keyworded plugin may take longer than the interactive default"
+            } else {
+                ""
+            };
             report
                 .warnings
-                .push(format!("timeout_ms = {ms} is clamped to {clamped} ms"));
+                .push(format!("timeout_ms = {ms} is clamped to {applied} ms{why}"));
         }
     }
 
@@ -943,7 +961,7 @@ pub async fn lint(directory: &Path, sample_query: &str) -> LintReport {
         &program,
         &plugin.directory,
         sample_query,
-        plugin.manifest.timeout(),
+        plugin.manifest.timeout(plugin.manifest.keyword.as_deref()),
     )
     .await
     {
@@ -1091,13 +1109,50 @@ mod tests {
     #[test]
     fn timeout_is_clamped_to_the_ceiling() {
         let mut manifest = plugin(None).manifest;
-        assert_eq!(manifest.timeout(), Duration::from_millis(180));
+        let keyword = Some("gh");
+        assert_eq!(manifest.timeout(keyword), Duration::from_millis(180));
 
         manifest.timeout_ms = Some(60_000);
-        assert_eq!(manifest.timeout(), Duration::from_millis(3000));
+        assert_eq!(manifest.timeout(keyword), Duration::from_millis(3000));
 
         manifest.timeout_ms = Some(1);
-        assert_eq!(manifest.timeout(), Duration::from_millis(50));
+        assert_eq!(manifest.timeout(keyword), Duration::from_millis(50));
+    }
+
+    #[test]
+    fn only_a_keyworded_plugin_may_raise_its_deadline() {
+        // An always-on plugin runs on every keystroke; `timeout_ms` exists so
+        // a keyworded network plugin can be slow, not so every plugin can.
+        let mut manifest = plugin(None).manifest;
+        manifest.timeout_ms = Some(3000);
+        assert_eq!(manifest.timeout(None), Duration::from_millis(180));
+        assert_eq!(manifest.timeout(Some("gh")), Duration::from_millis(3000));
+
+        manifest.timeout_ms = Some(100);
+        assert_eq!(manifest.timeout(None), Duration::from_millis(100));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_host_holds_an_always_on_plugin_to_the_interactive_deadline() {
+        // The deadline follows the keyword the plugin answers to right now,
+        // so an override that removes the keyword removes the allowance.
+        let root = tempfile::tempdir().expect("tempdir");
+        let mut slow = scripted(
+            root.path(),
+            "#!/bin/sh\nsleep 0.5\necho '{\"items\":[{\"title\":\"late\"}]}'\n",
+            Some(3000),
+        );
+        slow.id = "slow".to_owned();
+        let mut host = PluginHost {
+            plugins: vec![slow],
+            ..PluginHost::default()
+        };
+        assert_eq!(host.query("t x").await.items.len(), 1);
+
+        host.set_keyword_overrides([("slow", "")]);
+        let started = std::time::Instant::now();
+        assert!(host.query("x").await.items.is_empty());
+        assert!(started.elapsed() < Duration::from_millis(450));
     }
 
     #[test]
@@ -1262,7 +1317,7 @@ mod tests {
         );
 
         let started = std::time::Instant::now();
-        let (items, _) = plugin.query("x").await;
+        let (items, _) = plugin.query("x", plugin.manifest.timeout(Some("t"))).await;
         assert!(items.is_empty());
         assert!(
             started.elapsed() < Duration::from_millis(1500),
@@ -1283,7 +1338,7 @@ mod tests {
             Some(100),
         );
 
-        let (items, _) = plugin.query("x").await;
+        let (items, _) = plugin.query("x", plugin.manifest.timeout(Some("t"))).await;
         assert!(items.is_empty());
 
         assert!(
@@ -1326,7 +1381,10 @@ mod tests {
         );
         let pid_file = root.path().join("child.pid");
 
-        let running = tokio::spawn(async move { plugin.query("x").await });
+        let running = tokio::spawn(async move {
+            let deadline = plugin.manifest.timeout(Some("t"));
+            plugin.query("x", deadline).await
+        });
         let started = std::time::Instant::now();
         let recorded =
             |path: &Path| std::fs::read_to_string(path).is_ok_and(|pid| pid.ends_with('\n'));
