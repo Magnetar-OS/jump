@@ -24,7 +24,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libxkbcommon-dev libsqlite3-dev pkg-config just
+            libxkbcommon-dev libsqlite3-dev pkg-config just libarchive-tools
       - uses: Swatinem/rust-cache@v2
       - name: Formatting
         run: cargo fmt --check

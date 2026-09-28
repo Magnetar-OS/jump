@@ -299,8 +299,10 @@ schema — by running it, under the same deadline the launcher uses.
 Coming from Alfred: `jump plugin import MyWorkflow.alfredworkflow` converts
 each script filter into a plugin; the item JSON already speaks jump's schema,
 so most workflows run unchanged. A bundle from the internet is treated as
-hostile input — keywords cannot escape the plugin directory and a URL or
-snippet never reaches a shell as code.
+hostile input — keywords cannot escape the plugin directory, a URL or
+snippet never reaches a shell as code, and only the files the workflow
+names are read out of the bundle, at most 8 MiB each and 32 MiB in all, so
+a zip bomb is cut off rather than unpacked.
 
 ## Layout
 

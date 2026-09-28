@@ -42,6 +42,10 @@ All notable changes to this project are documented here. The format follows
   rebuilds the file index; and the rows either search had already put on
   screen leave it. Rebuilding the file index from the tray menu no longer
   starts a second content indexer alongside the first.
+- `jump plugin import` no longer unpacks a whole `.alfredworkflow` into
+  `/tmp`. It reads only `info.plist` and the scripts and icons that name,
+  each capped at 8 MiB and 32 MiB per import while decompressing, so a zip
+  bomb is refused instead of filling memory-backed `/tmp`.
 
 ## [1.1.1] - 2026-09-22
 

@@ -20,9 +20,11 @@
 //! as a warning rather than silently dropped — a converter that pretends it
 //! understood everything produces plugins that half work.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::io::Read as _;
+use std::path::{Component, Path, PathBuf};
 
 use plist::Value;
 
@@ -57,24 +59,159 @@ pub enum Error {
     NoExtractor,
     #[error("{0} already exists; remove it or import elsewhere")]
     AlreadyExists(PathBuf),
+    #[error("{0:?} is larger than a workflow file can be ({limit} MiB per file, {total} MiB per import)", limit = MAX_FILE_BYTES >> 20, total = MAX_IMPORT_BYTES >> 20)]
+    TooLarge(String),
+}
+
+/// Largest single file read out of a workflow: its `info.plist`, a script,
+/// an icon. Real ones are kilobytes.
+const MAX_FILE_BYTES: u64 = 8 << 20;
+
+/// Total read out of one workflow, however many filters it declares.
+const MAX_IMPORT_BYTES: u64 = 32 << 20;
+
+/// The workflow being imported: an extracted directory or an
+/// `.alfredworkflow` archive, read one named file at a time.
+///
+/// Nothing is ever extracted wholesale. The importer needs `info.plist` plus
+/// the scripts and icons it names, so those are all it reads, and every read
+/// is capped — per file and across the import — while the bytes arrive,
+/// never after. An archive's own size headers are not trusted: a zip bomb
+/// is cut off at the cap however small it claims to be.
+struct Bundle {
+    source: BundleSource,
+    /// Bytes still allowed across the whole import.
+    budget: Cell<u64>,
+}
+
+enum BundleSource {
+    /// A directory, canonicalised.
+    Directory(PathBuf),
+    /// A zip, read with `bsdtar`.
+    Archive(PathBuf),
+}
+
+impl Bundle {
+    fn open(workflow: &Path) -> Result<Self, Error> {
+        let source = if workflow.is_dir() {
+            BundleSource::Directory(workflow.canonicalize()?)
+        } else {
+            let available = std::env::var_os("PATH").is_some_and(|paths| {
+                std::env::split_paths(&paths).any(|dir| dir.join("bsdtar").is_file())
+            });
+            if !available {
+                return Err(Error::NoExtractor);
+            }
+            BundleSource::Archive(workflow.to_path_buf())
+        };
+        Ok(Self {
+            source,
+            budget: Cell::new(MAX_IMPORT_BYTES),
+        })
+    }
+
+    /// The contents of `relative`, or `None` when the bundle has no regular
+    /// file there.
+    ///
+    /// Every path an untrusted plist names goes through here. In a directory
+    /// it is resolved first, so `../`, an absolute path and a symlink out of
+    /// the bundle are all the same refused read, and only a regular file is
+    /// read — `/dev/zero` or a FIFO must not turn an import into an endless
+    /// read. In an archive only a plain relative member name is looked up.
+    fn read(&self, relative: &str) -> Result<Option<Vec<u8>>, Error> {
+        let limit = MAX_FILE_BYTES.min(self.budget.get());
+        let contents = match &self.source {
+            BundleSource::Directory(root) => {
+                let Ok(path) = root.join(relative).canonicalize() else {
+                    return Ok(None);
+                };
+                if !path.starts_with(root) || !path.is_file() {
+                    return Ok(None);
+                }
+                let mut contents = Vec::new();
+                std::fs::File::open(path)?
+                    .take(limit + 1)
+                    .read_to_end(&mut contents)?;
+                contents
+            }
+            BundleSource::Archive(archive) => {
+                let Some(member) = archive_member(relative) else {
+                    return Ok(None);
+                };
+                match read_member(archive, member, limit)? {
+                    Some(contents) => contents,
+                    None => return Ok(None),
+                }
+            }
+        };
+        let length = contents.len() as u64;
+        if length > limit {
+            return Err(Error::TooLarge(relative.to_owned()));
+        }
+        self.budget.set(self.budget.get() - length);
+        Ok(Some(contents))
+    }
+}
+
+/// `relative` as an archive member name, when it is a plain relative path.
+///
+/// `bsdtar` matches its arguments as patterns, so a name with pattern
+/// characters could select other members; such names, absolute paths, `..`
+/// and anything that could read as an option are refused outright.
+fn archive_member(relative: &str) -> Option<&str> {
+    let relative = relative.strip_prefix("./").unwrap_or(relative);
+    let plain = !relative.is_empty()
+        && !relative.starts_with('-')
+        && !relative.contains(['*', '?', '[', ']', '\\'])
+        && Path::new(relative)
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)));
+    plain.then_some(relative)
+}
+
+/// Stream one member of `archive` through `bsdtar -O`, stopping at
+/// `limit + 1` bytes. `None` when the archive has no such member.
+fn read_member(archive: &Path, member: &str, limit: u64) -> Result<Option<Vec<u8>>, Error> {
+    let mut child = std::process::Command::new("bsdtar")
+        .arg("-xOf")
+        .arg(archive)
+        .arg(member)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    let mut contents = Vec::new();
+    let read = child
+        .stdout
+        .take()
+        .expect("stdout is piped")
+        .take(limit + 1)
+        .read_to_end(&mut contents);
+    if read.is_err() || contents.len() as u64 > limit {
+        // Over the cap: the rest is never decompressed.
+        let _ = child.kill();
+    }
+    let status = child.wait()?;
+    read?;
+    if contents.len() as u64 > limit {
+        return Ok(Some(contents));
+    }
+    match (status.success(), contents.is_empty()) {
+        (true, _) => Ok(Some(contents)),
+        // bsdtar's answer for a name the archive does not have.
+        (false, true) => Ok(None),
+        (false, false) => Err(Error::Io(std::io::Error::other(format!(
+            "bsdtar exited with {status} reading {member:?}"
+        )))),
+    }
 }
 
 /// Import `workflow` — an `.alfredworkflow` bundle or an extracted directory —
 /// creating one plugin per script filter under `destination_root`.
 pub fn import(workflow: &Path, destination_root: &Path) -> Result<Import, Error> {
-    // A bundle is a zip; extract it somewhere disposable first. `tempfile`
-    // gives the directory a 0700 mode and an unpredictable name — /tmp is
-    // shared, and a predictable path is a symlink target — and removes it
-    // when the guard drops.
-    let (source, _extracted) = if workflow.is_dir() {
-        (workflow.to_path_buf(), None)
-    } else {
-        let extracted = extract(workflow)?;
-        (extracted.path().to_path_buf(), Some(extracted))
-    };
-
-    let manifest_path = bundle_file(&source, "info.plist").ok_or(Error::NotAWorkflow)?;
-    let info = Value::from_file(&manifest_path)?;
+    let bundle = Bundle::open(workflow)?;
+    let info = bundle.read("info.plist")?.ok_or(Error::NotAWorkflow)?;
+    let info = Value::from_reader(std::io::Cursor::new(info))?;
 
     let workflow_name = string_key(&info, "name").unwrap_or_else(|| "Imported workflow".into());
     let workflow_description = string_key(&info, "description").unwrap_or_default();
@@ -143,7 +280,7 @@ pub fn import(workflow: &Path, destination_root: &Path) -> Result<Import, Error>
             keyword,
             &objects,
             connections,
-            &source,
+            &bundle,
             staging.path(),
             &directory,
             &workflow_name,
@@ -151,6 +288,9 @@ pub fn import(workflow: &Path, destination_root: &Path) -> Result<Import, Error>
             &mut import.warnings,
         ) {
             Ok(imported) => staged.push((staging, imported)),
+            // A bundle over its size limits is refused as a whole, not
+            // filter by filter.
+            Err(error @ Error::TooLarge(_)) => return Err(error),
             Err(error) => import
                 .warnings
                 .push(format!("script filter {uid} skipped: {error}")),
@@ -254,19 +394,6 @@ fn filter_title(filter: &plist::Dictionary, workflow_name: &str) -> String {
         .to_owned()
 }
 
-/// `relative` inside the bundle at `source`, when it names a regular file
-/// that is really there.
-///
-/// Every path an untrusted plist names goes through here. Resolving first
-/// means `../`, an absolute path and a symlink out of the bundle are all the
-/// same refused read, and requiring a regular file keeps `/dev/zero` or a
-/// FIFO from turning an import into an endless read.
-fn bundle_file(source: &Path, relative: &str) -> Option<PathBuf> {
-    let root = source.canonicalize().ok()?;
-    let path = source.join(relative).canonicalize().ok()?;
-    (path.starts_with(&root) && path.is_file()).then_some(path)
-}
-
 /// Convert one script filter and its primary connection, writing the plugin
 /// into `staging`. `directory` is where it will live once moved into place,
 /// which is what the manifest's absolute icon path has to name.
@@ -277,7 +404,7 @@ fn convert_filter(
     keyword: Option<String>,
     objects: &HashMap<String, &plist::Dictionary>,
     connections: Option<&plist::Dictionary>,
-    source: &Path,
+    bundle: &Bundle,
     staging: &Path,
     directory: &Path,
     workflow_name: &str,
@@ -292,7 +419,7 @@ fn convert_filter(
 
     let title = filter_title(filter, workflow_name);
 
-    let query = script_from(&config, source)?;
+    let query = script_from(&config, bundle)?;
     let query_file = write_script(staging, "search", &query)?;
 
     // The object this filter feeds is the activation.
@@ -324,7 +451,7 @@ fn convert_filter(
                 .map(ToOwned::to_owned)
         })
         .and_then(|destination| objects.get(&destination))
-        .and_then(|action| convert_action(action, source, staging, warnings).transpose())
+        .and_then(|action| convert_action(action, bundle, staging, warnings).transpose())
         .transpose()?;
 
     // Alfred workflows were written with no deadline at all; give them the
@@ -341,7 +468,7 @@ fn convert_filter(
     if let Some(activate) = &activate {
         let _ = writeln!(manifest, "activate = \"./{activate}\"");
     }
-    if let Some(icon) = copy_icon(uid, source, staging, directory)? {
+    if let Some(icon) = copy_icon(uid, bundle, staging, directory)? {
         let _ = writeln!(manifest, "icon = \"{}\"", toml_escape(&icon));
     }
     manifest.push_str("# Imported from Alfred, which has no query deadline; tune down once\n");
@@ -356,19 +483,23 @@ fn convert_filter(
 }
 
 /// The filter's query program, as (shebang-prefixed) script text.
-fn script_from(config: &plist::Dictionary, source: &Path) -> Result<String, Error> {
+fn script_from(config: &plist::Dictionary, bundle: &Bundle) -> Result<String, Error> {
     // `scriptfile` wins when both are present, matching Alfred.
     if let Some(file) = config
         .get("scriptfile")
         .and_then(Value::as_string)
         .filter(|file| !file.is_empty())
     {
-        let path = bundle_file(source, file).ok_or_else(|| {
+        let bytes = bundle.read(file)?.ok_or_else(|| {
             Error::Io(std::io::Error::other(format!(
                 "script file {file:?} is not a file inside the workflow"
             )))
         })?;
-        let text = std::fs::read_to_string(path)?;
+        let text = String::from_utf8(bytes).map_err(|_| {
+            Error::Io(std::io::Error::other(format!(
+                "script file {file:?} is not UTF-8 text"
+            )))
+        })?;
         return Ok(rewrite_query_placeholder(&text, argv_style(config)));
     }
 
@@ -448,7 +579,7 @@ printf '%s' \"${template//'{query}'/$1}\" | wl-copy
 /// to calling the query program with `--activate`.
 fn convert_action(
     action: &plist::Dictionary,
-    source: &Path,
+    bundle: &Bundle,
     directory: &Path,
     warnings: &mut Vec<String>,
 ) -> Result<Option<String>, Error> {
@@ -471,7 +602,7 @@ fn convert_action(
             std::fs::write(directory.join("open.data"), url)?;
             OPEN_URL_TEMPLATE.to_owned()
         }
-        "alfred.workflow.action.script" => script_from(&config, source)?,
+        "alfred.workflow.action.script" => script_from(&config, bundle)?,
         "alfred.workflow.output.clipboard" => {
             warnings.push("the clipboard action needs `wl-copy` at run time".to_owned());
             let text = config
@@ -509,42 +640,17 @@ fn write_script(directory: &Path, name: &str, contents: &str) -> Result<String, 
 /// launcher's working directory.
 fn copy_icon(
     uid: &str,
-    source: &Path,
+    bundle: &Bundle,
     staging: &Path,
     directory: &Path,
 ) -> Result<Option<String>, Error> {
     for candidate in [format!("{uid}.png"), "icon.png".to_owned()] {
-        if let Some(icon) = bundle_file(source, &candidate) {
-            std::fs::copy(&icon, staging.join("icon.png"))?;
+        if let Some(icon) = bundle.read(&candidate)? {
+            std::fs::write(staging.join("icon.png"), icon)?;
             return Ok(Some(directory.join("icon.png").display().to_string()));
         }
     }
     Ok(None)
-}
-
-/// Extract an `.alfredworkflow` bundle (a zip) into a fresh private
-/// directory, removed when the returned guard drops.
-fn extract(bundle: &Path) -> Result<tempfile::TempDir, Error> {
-    let available = std::env::var_os("PATH")
-        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join("bsdtar").is_file()));
-    if !available {
-        return Err(Error::NoExtractor);
-    }
-
-    let destination = tempfile::Builder::new().prefix("jump-alfred-").tempdir()?;
-
-    let status = std::process::Command::new("bsdtar")
-        .arg("-xf")
-        .arg(bundle)
-        .arg("-C")
-        .arg(destination.path())
-        .status()?;
-    if !status.success() {
-        return Err(Error::Io(std::io::Error::other(format!(
-            "bsdtar exited with {status}"
-        ))));
-    }
-    Ok(destination)
 }
 
 fn string_key(value: &Value, key: &str) -> Option<String> {
@@ -870,6 +976,86 @@ mod tests {
         ));
 
         assert!(entries(&plugins).is_empty());
+    }
+
+    /// Zip `members` of `directory` into an `.alfredworkflow` beside it,
+    /// named the way Alfred names them: no `./` prefix.
+    fn archive(directory: &Path, members: &[&str]) -> PathBuf {
+        let bundle = directory.with_extension("alfredworkflow");
+        let status = std::process::Command::new("bsdtar")
+            .args(["--format", "zip", "-cf"])
+            .arg(&bundle)
+            .arg("-C")
+            .arg(directory)
+            .args(members)
+            .status()
+            .expect("bsdtar is installed");
+        assert!(status.success());
+        bundle
+    }
+
+    #[test]
+    fn an_archived_workflow_imports() {
+        let (_root, workflow, plugins) = workspace();
+        let fixture = FIXTURE.replace(
+            "<key>scriptargtype</key>",
+            "<key>scriptfile</key><string>filter.sh</string><key>scriptargtype</key>",
+        );
+        std::fs::write(workflow.join("info.plist"), fixture).expect("fixture");
+        std::fs::write(workflow.join("filter.sh"), "#!/bin/sh\necho \"{query}\"\n")
+            .expect("script");
+        std::fs::write(workflow.join("icon.png"), b"png").expect("icon");
+        let bundle = archive(&workflow, &["info.plist", "filter.sh", "icon.png"]);
+
+        let import = import(&bundle, &plugins).expect("import succeeds");
+        let directory = &import.plugins[0].directory;
+        assert_eq!(
+            std::fs::read_to_string(directory.join("search")).expect("script"),
+            "#!/bin/sh\necho \"$1\"\n"
+        );
+        assert_eq!(
+            std::fs::read(directory.join("icon.png")).expect("icon"),
+            b"png"
+        );
+    }
+
+    #[test]
+    fn a_zip_bomb_is_cut_off_at_the_cap() {
+        // 64 MiB of one byte compresses to next to nothing. Extracting the
+        // bundle wholesale wrote all of it to /tmp — RAM, on tmpfs — before
+        // anything looked at a size; now the read stops at the cap.
+        let (_root, workflow, plugins) = workspace();
+        let fixture = FIXTURE.replace(
+            "<key>scriptargtype</key>",
+            "<key>scriptfile</key><string>bomb.sh</string><key>scriptargtype</key>",
+        );
+        std::fs::write(workflow.join("info.plist"), fixture).expect("fixture");
+        std::fs::write(workflow.join("bomb.sh"), vec![b'a'; 64 << 20]).expect("bomb");
+        let bundle = archive(&workflow, &["info.plist", "bomb.sh"]);
+        assert!(std::fs::metadata(&bundle).expect("bundle").len() < 1 << 20);
+
+        assert!(matches!(
+            import(&bundle, &plugins),
+            Err(Error::TooLarge(name)) if name == "bomb.sh"
+        ));
+        assert!(entries(&plugins).is_empty(), "{:?}", entries(&plugins));
+    }
+
+    #[test]
+    fn archive_members_must_be_plain_relative_names() {
+        assert_eq!(archive_member("info.plist"), Some("info.plist"));
+        assert_eq!(archive_member("./bin/run.sh"), Some("bin/run.sh"));
+        for hostile in [
+            "",
+            "/etc/passwd",
+            "../x",
+            "a/../../x",
+            "*",
+            "icon?.png",
+            "-x",
+        ] {
+            assert_eq!(archive_member(hostile), None, "{hostile:?}");
+        }
     }
 
     #[test]
