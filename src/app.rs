@@ -182,6 +182,8 @@ pub struct App {
     screen: Size,
 
     input: String,
+    /// What each provider answered for the query on screen, before ranking.
+    arrived: Arrived,
     results: Vec<Item>,
     /// Icon handle per entry in `results`, resolved when the results are
     /// installed rather than while drawing.
@@ -437,6 +439,12 @@ impl App {
             .collect()
     }
 
+    /// Rank everything the providers have answered for the current query.
+    fn rerank(&mut self) {
+        let items = self.arrived.all();
+        self.set_results(items);
+    }
+
     /// Replace the visible results, restarting the row cascade only when the
     /// set actually changed.
     ///
@@ -538,6 +546,10 @@ impl App {
 
     /// Run a query against both the launcher service and the plugin host.
     fn search(&mut self, query: String) -> Task<Message> {
+        // Answers for a different query are stale; a re-run of the same one
+        // (a window opened, say) keeps them until the providers re-answer.
+        self.arrived.retarget(&query);
+
         // A `kill …` query is answered here and now: it must not fan out to
         // the other providers, and not only for tidiness. The file search
         // spawns `plocate` with the query text in its argv — a process that
@@ -636,7 +648,11 @@ impl App {
             ));
         }
 
-        if let Some(content) = self.content.clone() {
+        // Like file search, content search stays out of a query a keyworded
+        // plugin has claimed.
+        if let Some(content) = self.content.clone()
+            && !self.plugins.is_claimed(&query_for_content)
+        {
             let text = query_for_content;
             tasks.push(Task::perform(
                 async move {
@@ -799,6 +815,7 @@ impl App {
         self.surface = Some(id);
         self.dismissing = false;
         self.input.clear();
+        self.arrived = Arrived::default();
         self.results.clear();
         self.result_icons.clear();
         self.selected = 0;
@@ -877,6 +894,7 @@ impl App {
         };
         self.dismissing = false;
         self.input.clear();
+        self.arrived = Arrived::default();
         self.results.clear();
         self.result_icons.clear();
         self.selected = 0;
@@ -1220,6 +1238,7 @@ impl cosmic::Application for App {
             surface: None,
             screen: Size::new(1920.0, 1080.0),
             input: String::new(),
+            arrived: Arrived::default(),
             results: Vec::new(),
             result_icons: Vec::new(),
             apps: apps::load(),
@@ -1309,7 +1328,8 @@ impl cosmic::Application for App {
                     // mismatch means a newer response is already in flight, and
                     // keeping the current list is better than flashing.
                     if query == self.input {
-                        self.set_results(items);
+                        self.arrived.launcher = items;
+                        self.rerank();
                         return self.refresh_blur();
                     }
                     Task::none()
@@ -1375,17 +1395,12 @@ impl cosmic::Application for App {
                 if query != self.input {
                     return Task::none();
                 }
-                if self.plugins.is_claimed(&query) {
-                    // The plugin owns this query outright.
-                    self.set_results(items);
-                } else if !items.is_empty() {
-                    // Otherwise plugin results join the service's, above them:
-                    // the user typed a keyword, so that intent outranks a fuzzy
-                    // application match.
-                    let mut merged = items;
-                    merged.append(&mut self.results);
-                    self.set_results(merged);
-                }
+                // Replaces the previous answer, so a streaming plugin's rerun
+                // updates its rows rather than adding a second copy. A claimed
+                // query has nothing else in `arrived`: the service was
+                // interrupted and the other providers were not asked.
+                self.arrived.plugins = items;
+                self.rerank();
 
                 let refresh = self.refresh_blur();
                 // A plugin that asked to stream gets the same query again
@@ -1425,24 +1440,22 @@ impl cosmic::Application for App {
             }
 
             Message::ContentResults { query, items } => {
-                if query != self.input || items.is_empty() {
+                if query != self.input {
                     return Task::none();
                 }
-                let mut merged = std::mem::take(&mut self.results);
-                merged.extend(items);
-                self.set_results(merged);
+                self.arrived.content = items;
+                self.rerank();
                 self.refresh_blur()
             }
 
             Message::FileResults { query, items } => {
                 // Same staleness rule as every other provider: a result set is
                 // only trusted while it still describes what the user has typed.
-                if query != self.input || items.is_empty() {
+                if query != self.input {
                     return Task::none();
                 }
-                let mut merged = std::mem::take(&mut self.results);
-                merged.extend(items);
-                self.set_results(merged);
+                self.arrived.files = items;
+                self.rerank();
                 self.refresh_blur()
             }
 
@@ -2101,6 +2114,45 @@ fn emoji_items(needle: &str) -> Vec<Item> {
         .collect()
 }
 
+/// What each asynchronous provider answered for one query, unranked.
+///
+/// Providers answer at different times and every arrival re-ranks the list.
+/// That has to start from what the providers said: the ranked list already
+/// carries injected rows (windows, system commands, devices, fallbacks) and
+/// scores that were normalised and frecency-boosted, so feeding it back in
+/// duplicated those rows on every arrival and shrank file scores each time —
+/// an exact filename match sank below a weak content hit.
+#[derive(Debug, Default)]
+struct Arrived {
+    /// The query these answers belong to.
+    query: String,
+    launcher: Vec<Item>,
+    plugins: Vec<Item>,
+    files: Vec<Item>,
+    content: Vec<Item>,
+}
+
+impl Arrived {
+    /// Forget the answers unless they are for `query`.
+    fn retarget(&mut self, query: &str) {
+        if self.query != query {
+            *self = Self {
+                query: query.to_owned(),
+                ..Self::default()
+            };
+        }
+    }
+
+    /// Every answer, ready for [`jump_core::rank::merge`].
+    fn all(&self) -> Vec<Item> {
+        [&self.plugins, &self.launcher, &self.files, &self.content]
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect()
+    }
+}
+
 /// Query the plugin host off the frame, tagging the answer with the query
 /// that produced it and any requested rerun interval.
 fn query_plugins(plugins: PluginHost, query: String) -> Task<Message> {
@@ -2208,4 +2260,87 @@ fn launcher_stream() -> impl cosmic::iced::futures::Stream<Item = Message> {
 
         guard.shutdown().await;
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(key: &str, source: Source, score: f32) -> Item {
+        Item {
+            key: jump_core::ItemKey(key.to_owned()),
+            id: 0,
+            title: key.to_owned(),
+            subtitle: String::new(),
+            icon: None,
+            category_icon: None,
+            window: None,
+            source,
+            autocomplete: None,
+            score,
+        }
+    }
+
+    fn file(key: &str, score: f32) -> Item {
+        item(
+            key,
+            Source::File {
+                path: std::path::PathBuf::from(key),
+            },
+            score,
+        )
+    }
+
+    #[test]
+    fn every_arrival_reranks_from_the_raw_answers() {
+        let frecency = Frecency::default();
+        let mut arrived = Arrived::default();
+        arrived.retarget("notes");
+
+        arrived.launcher = vec![item("notes", Source::Launcher, 0.0)];
+        let first = jump_core::rank::merge(arrived.all(), "notes", &frecency);
+
+        arrived.files = vec![file("notes.txt", 3.6)];
+        let with_files = jump_core::rank::merge(arrived.all(), "notes", &frecency);
+
+        // A later, weaker provider must not move what was already there.
+        arrived.content = vec![file("other.txt", 1.0)];
+        // A streaming plugin's rerun replaces its rows.
+        arrived.plugins = vec![item("plugin:p:a", Source::Launcher, 0.0)];
+        arrived.plugins = vec![item("plugin:p:a", Source::Launcher, 0.0)];
+        let settled = jump_core::rank::merge(arrived.all(), "notes", &frecency);
+
+        let score = |items: &[Item], key: &str| {
+            items
+                .iter()
+                .find(|item| item.key.as_str() == key)
+                .map(|item| item.score)
+        };
+        assert_eq!(first.len(), 1);
+        assert_eq!(
+            score(&with_files, "notes.txt"),
+            score(&settled, "notes.txt")
+        );
+        let position = |key: &str| settled.iter().position(|item| item.key.as_str() == key);
+        assert!(position("notes.txt") < position("other.txt"));
+
+        let mut keys: Vec<&str> = settled.iter().map(|item| item.key.as_str()).collect();
+        let total = keys.len();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), total, "a row appeared twice");
+    }
+
+    #[test]
+    fn a_new_query_forgets_the_old_answers_and_a_rerun_keeps_them() {
+        let mut arrived = Arrived::default();
+        arrived.retarget("fire");
+        arrived.files = vec![file("fire.txt", 3.0)];
+
+        arrived.retarget("fire");
+        assert_eq!(arrived.all().len(), 1);
+
+        arrived.retarget("firef");
+        assert!(arrived.all().is_empty());
+    }
 }

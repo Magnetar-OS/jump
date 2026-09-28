@@ -18,6 +18,12 @@ All notable changes to this project are documented here. The format follows
   outlive the query. The 1 MiB output cap is enforced while reading, so
   a runaway plugin is cut off at the cap instead of being buffered in full
   until its deadline. `jump plugin lint` applies the same cap.
+- Results no longer duplicate or reshuffle as providers answer. Each arrival
+  (applications, files, contents, plugins) used to be merged into the
+  already-ranked list, which repeated window, command and web-search rows and
+  pushed exact filename matches below weaker content matches. A streaming
+  plugin's rerun replaces its rows instead of adding a second copy, and
+  content search stays out of a query a keyworded plugin has claimed.
 
 ## [1.1.1] - 2026-09-22
 
