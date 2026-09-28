@@ -37,6 +37,12 @@ What `jump` does enforce is blast radius, not intent:
   results dropped;
 - a plugin that prints more than 1 MiB is cut off there and killed the same
   way;
+- a query the next keystroke supersedes is abandoned, and its plugin killed
+  the same way, so no plugin keeps working on a query nobody is waiting
+  for;
+- a plugin that answers in time keeps whatever it deliberately left running
+  (a cache refresh with its output redirected, say): only an overrun or an
+  abandoned query kills the group;
 - a plugin that crashes, hangs or prints garbage degrades its own results and
   nothing else;
 - any plugin can be switched off in Settings without deleting it.

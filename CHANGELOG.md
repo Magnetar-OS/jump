@@ -46,6 +46,10 @@ All notable changes to this project are documented here. The format follows
   `/tmp`. It reads only `info.plist` and the scripts and icons that name,
   each capped at 8 MiB and 32 MiB per import while decompressing, so a zip
   bomb is refused instead of filling memory-backed `/tmp`.
+- Typing no longer leaves every superseded query's plugins, file search and
+  content search running to completion or their deadline: each keystroke
+  cancels the work the previous one started, and a cancelled plugin is
+  killed with its process group.
 
 ## [1.1.1] - 2026-09-22
 

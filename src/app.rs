@@ -197,6 +197,12 @@ pub struct App {
     input: String,
     /// What each provider answered for the query on screen, before ranking.
     arrived: Arrived,
+    /// The plugin, file and content queries still running for the query on
+    /// screen. Each handle aborts its task when dropped, which is how a
+    /// keystroke cancels the work the previous one started — a plugin's
+    /// process group is killed with it — instead of letting every
+    /// superseded query run to completion or its deadline.
+    in_flight: Vec<cosmic::iced::task::Handle>,
     results: Vec<Item>,
     /// Icon handle per entry in `results`, resolved when the results are
     /// installed rather than while drawing.
@@ -567,6 +573,8 @@ impl App {
         // Answers for a different query are stale; a re-run of the same one
         // (a window opened, say) keeps them until the providers re-answer.
         self.arrived.retarget(&query);
+        // Whatever the last query still has running is superseded either way.
+        self.in_flight.clear();
 
         // A `kill …` query is answered here and now: it must not fan out to
         // the other providers, and not only for tidiness. The file search
@@ -646,7 +654,7 @@ impl App {
         let mut tasks = Vec::new();
 
         if !self.plugins.is_empty() {
-            tasks.push(query_plugins(self.plugins.clone(), query.clone()));
+            tasks.push(self.track(query_plugins(self.plugins.clone(), query.clone())));
         }
 
         let query_for_content = query.clone();
@@ -657,13 +665,14 @@ impl App {
             && !self.plugins.is_claimed(&query)
         {
             let text = query;
-            tasks.push(Task::perform(
+            let task = Task::perform(
                 async move {
                     let items = files.search(&text).await;
                     (text, items)
                 },
                 |(query, items)| cosmic::action::app(Message::FileResults { query, items }),
-            ));
+            );
+            tasks.push(self.track(task));
         }
 
         // Like file search, content search stays out of a query a keyworded
@@ -672,7 +681,7 @@ impl App {
             && !self.plugins.is_claimed(&query_for_content)
         {
             let text = query_for_content;
-            tasks.push(Task::perform(
+            let task = Task::perform(
                 async move {
                     let items = content.lock().await.search(&text).unwrap_or_else(|error| {
                         tracing::warn!(%error, "content search failed");
@@ -681,10 +690,19 @@ impl App {
                     (text, items)
                 },
                 |(query, items)| cosmic::action::app(Message::ContentResults { query, items }),
-            ));
+            );
+            tasks.push(self.track(task));
         }
 
         Task::batch(tasks)
+    }
+
+    /// Make `task` abortable, holding its handle in [`Self::in_flight`] so
+    /// the next query cancels it.
+    fn track(&mut self, task: Task<Message>) -> Task<Message> {
+        let (task, handle) = task.abortable();
+        self.in_flight.push(handle.abort_on_drop());
+        task
     }
 
     /// Re-send the blur region so it matches the panel's current geometry.
@@ -965,6 +983,7 @@ impl App {
         self.dismissing = false;
         self.input.clear();
         self.arrived = Arrived::default();
+        self.in_flight.clear();
         self.results.clear();
         self.result_icons.clear();
         self.selected = 0;
@@ -1309,6 +1328,7 @@ impl cosmic::Application for App {
             screen: Size::new(1920.0, 1080.0),
             input: String::new(),
             arrived: Arrived::default(),
+            in_flight: Vec::new(),
             results: Vec::new(),
             result_icons: Vec::new(),
             apps: apps::load(),
@@ -1486,7 +1506,8 @@ impl cosmic::Application for App {
                 if query != self.input || self.surface.is_none() || self.dismissing {
                     return Task::none();
                 }
-                query_plugins(self.plugins.clone(), query)
+                let rerun = query_plugins(self.plugins.clone(), query);
+                self.track(rerun)
             }
 
             Message::PluginsDiscovered(host) => {

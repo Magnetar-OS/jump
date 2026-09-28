@@ -98,11 +98,12 @@ enum RunError {
 /// Run a query command under `deadline` and the output cap, returning its
 /// stdout.
 ///
-/// The command leads its own process group, and overrunning either limit
-/// kills the whole group: a shell script's background jobs are part of the
-/// query that started them, and must not outlive its dropped results. A
-/// command that finishes in time keeps anything it deliberately left behind
-/// (a cache refresh with its output redirected, say).
+/// The command leads its own process group, and overrunning either limit —
+/// or the query being abandoned, by dropping this future — kills the whole
+/// group: a shell script's background jobs are part of the query that
+/// started them, and must not outlive its dropped results. A command that
+/// finishes in time keeps anything it deliberately left behind (a cache
+/// refresh with its output redirected, say).
 async fn run_query(
     program: &Path,
     directory: &Path,
@@ -120,9 +121,9 @@ async fn run_query(
         .process_group(0)
         .kill_on_drop(true)
         .spawn()?;
-    // The group id is the child's pid, which cannot be reused before the
-    // child is reaped — and it is only reaped on the success path below.
-    let group = child.id();
+    // The group id is the child's pid, which cannot be reused while the
+    // child or anything else in its group is alive.
+    let mut group = GroupKill(child.id());
     let stdout = child.stdout.take().expect("stdout is piped");
     let stderr = child.stderr.take().expect("stderr is piped");
 
@@ -149,6 +150,8 @@ async fn run_query(
             return Err(RunError::TooLarge);
         }
         let status = child.wait().await?;
+        // It exited on its own: whatever it left running was left on purpose.
+        group.disarm();
         Ok((status, output))
     };
 
@@ -158,38 +161,46 @@ async fn run_query(
             status,
             stderr: stderr.await.unwrap_or_default(),
         }),
-        Ok(Err(error)) => {
-            kill_group(group).await;
-            Err(error)
-        }
-        Err(_) => {
-            kill_group(group).await;
-            Err(RunError::Deadline(deadline))
-        }
+        // On both of these `group` is still armed and kills on return.
+        Ok(Err(error)) => Err(error),
+        Err(_) => Err(RunError::Deadline(deadline)),
     }
 }
 
-/// `SIGKILL` a plugin's whole process group.
+/// `SIGKILL`s a plugin's whole process group when dropped, unless
+/// [disarmed](Self::disarm).
+///
+/// A drop guard rather than a call on the error paths, because the query
+/// future can also be dropped from outside: the launcher abandons a query
+/// the moment the next keystroke supersedes it. `kill_on_drop` then reaches
+/// only the script itself.
 ///
 /// Through `kill(1)`, as [`crate::process::terminate`] does, rather than a
-/// syscall binding: this runs only when a plugin has already misbehaved.
-/// The leader itself is also killed by `kill_on_drop`, so a failure here
-/// costs the stragglers, not the deadline.
-async fn kill_group(group: Option<u32>) {
-    let Some(group) = group else {
-        return;
-    };
-    let result = Command::new("kill")
-        .args(["-KILL", "--", &format!("-{group}")])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await;
-    match result {
-        Ok(status) if status.success() => {}
-        Ok(status) => tracing::warn!(group, ?status, "could not kill plugin process group"),
-        Err(error) => tracing::warn!(group, %error, "could not run kill for plugin process group"),
+/// syscall binding: this runs only when a query was abandoned or a plugin
+/// misbehaved. It is spawned, not awaited — a destructor cannot wait — and
+/// tokio reaps the dropped `kill` process in the background.
+struct GroupKill(Option<u32>);
+
+impl GroupKill {
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for GroupKill {
+    fn drop(&mut self) {
+        let Some(group) = self.0 else {
+            return;
+        };
+        let spawned = Command::new("kill")
+            .args(["-KILL", "--", &format!("-{group}")])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        if let Err(error) = spawned {
+            tracing::warn!(group, %error, "could not kill plugin process group");
+        }
     }
 }
 
@@ -1275,7 +1286,17 @@ mod tests {
         let (items, _) = plugin.query("x").await;
         assert!(items.is_empty());
 
-        let pid: u32 = std::fs::read_to_string(root.path().join("child.pid"))
+        assert!(
+            !outlives(&root.path().join("child.pid")).await,
+            "the plugin's child outlived the deadline"
+        );
+    }
+
+    /// Whether the process whose pid was written to `pid_file` is still
+    /// running two seconds on. Kills it either way, so a failing test does
+    /// not leave a stray behind for the rest of the suite.
+    async fn outlives(pid_file: &Path) -> bool {
+        let pid: u32 = std::fs::read_to_string(pid_file)
             .expect("the script recorded its child")
             .trim()
             .parse()
@@ -1286,12 +1307,39 @@ mod tests {
         }
         let survived = alive(pid);
         if survived {
-            // Do not leave the stray behind for the rest of the suite.
             let _ = std::process::Command::new("kill")
                 .args(["-KILL", &pid.to_string()])
                 .status();
         }
-        assert!(!survived, "the plugin's child outlived the deadline");
+        survived
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_abandoned_query_is_killed_with_its_children() {
+        // The launcher drops a query's future when the next keystroke
+        // supersedes it; that has to stop the plugin, not just forget it.
+        let root = tempfile::tempdir().expect("tempdir");
+        let plugin = scripted(
+            root.path(),
+            "#!/bin/sh\nsleep 30 &\necho $! > child.pid\nwait\n",
+            Some(3000),
+        );
+        let pid_file = root.path().join("child.pid");
+
+        let running = tokio::spawn(async move { plugin.query("x").await });
+        let started = std::time::Instant::now();
+        let recorded =
+            |path: &Path| std::fs::read_to_string(path).is_ok_and(|pid| pid.ends_with('\n'));
+        while !recorded(&pid_file) && started.elapsed() < Duration::from_secs(2) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        running.abort();
+        assert!(running.await.is_err_and(|error| error.is_cancelled()));
+
+        assert!(
+            !outlives(&pid_file).await,
+            "the abandoned query's child kept running"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
