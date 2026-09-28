@@ -183,6 +183,8 @@ highlighted row stays on the item the user was about to hit.
 **It is a daemon.** Spawning the service, indexing desktop entries, discovering
 plugins, and creating a wgpu device all happen once at startup. A second
 invocation reaches the running instance over D-Bus and only maps a surface.
+The plugin directories are watched from then on, so a plugin installed,
+removed or edited while the daemon runs takes effect without a restart.
 
 ## Install
 

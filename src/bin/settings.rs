@@ -58,8 +58,8 @@ struct App {
     /// case the window still renders but cannot persist anything.
     handle: Option<cosmic_config::Config>,
     config: Config,
-    /// Discovered jump plugins, listed so each can be switched off. Read once
-    /// at startup; installing a plugin means reopening this window.
+    /// Discovered jump plugins, listed so each can be switched off. Kept
+    /// current by watching the plugin directories.
     plugins: Vec<(String, String, Option<String>)>,
 }
 
@@ -89,6 +89,8 @@ enum Message {
     UnpinFavorite(String),
     /// The store changed — here, in the launcher (a pin), or by hand.
     ConfigChanged(Box<Config>),
+    /// A plugin was installed, removed or edited.
+    PluginsDiscovered(PluginHost),
 }
 
 /// Which provider a [`Message::Provider`] refers to.
@@ -141,18 +143,7 @@ impl cosmic::Application for App {
         let handle = cosmic_config::Config::new(jump::APP_ID, Config::VERSION).ok();
         let config = Config::load();
 
-        // The host's discovery, minus the parts only the launcher needs: this
-        // window lists plugins, it does not run them.
-        let plugins = PluginHost::discover()
-            .all()
-            .map(|(plugin, _)| {
-                (
-                    plugin.id.clone(),
-                    plugin.manifest.name.clone(),
-                    plugin.manifest.keyword.clone(),
-                )
-            })
-            .collect();
+        let plugins = listed(&PluginHost::discover());
 
         (
             Self {
@@ -232,6 +223,10 @@ impl cosmic::Application for App {
                 self.config = *config;
                 return Task::none();
             }
+            Message::PluginsDiscovered(host) => {
+                self.plugins = listed(&host);
+                return Task::none();
+            }
         }
 
         self.save(next);
@@ -239,14 +234,17 @@ impl cosmic::Application for App {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        self.core()
-            .watch_config::<Config>(jump::APP_ID)
-            .map(|update| {
-                for error in update.errors {
-                    tracing::warn!(%error, "ignoring an unreadable setting");
-                }
-                Message::ConfigChanged(Box::new(update.config))
-            })
+        Subscription::batch([
+            self.core()
+                .watch_config::<Config>(jump::APP_ID)
+                .map(|update| {
+                    for error in update.errors {
+                        tracing::warn!(%error, "ignoring an unreadable setting");
+                    }
+                    Message::ConfigChanged(Box::new(update.config))
+                }),
+            Subscription::run(jump::plugins::watch).map(Message::PluginsDiscovered),
+        ])
     }
 
     // One section builder per settings group; splitting it would only scatter
@@ -567,6 +565,21 @@ fn persist(
 /// unit-separator between an entry's name and description becomes a dash.
 /// The alternative is showing the user a control-character-laden string and
 /// expecting them to recognise what they pinned.
+/// The plugins as this window lists them: id, name and manifest keyword.
+/// The host's discovery, minus the parts only the launcher needs — this
+/// window lists plugins, it does not run them.
+fn listed(host: &PluginHost) -> Vec<(String, String, Option<String>)> {
+    host.all()
+        .map(|(plugin, _)| {
+            (
+                plugin.id.clone(),
+                plugin.manifest.name.clone(),
+                plugin.manifest.keyword.clone(),
+            )
+        })
+        .collect()
+}
+
 fn favorite_label(key: &str) -> String {
     let (kind, rest) = key.split_once(':').unwrap_or(("", key));
     let rest = rest.replace('\u{1f}', " — ");

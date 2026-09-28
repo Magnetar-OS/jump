@@ -194,7 +194,7 @@ async fn kill_group(group: Option<u32>) {
 }
 
 /// Parsed `manifest.toml`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Manifest {
     /// Human-readable name, shown as the result category.
     pub name: String,
@@ -358,7 +358,7 @@ fn merge_variables(
 }
 
 /// A discovered plugin: its manifest plus the directory it lives in.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plugin {
     /// The parsed `manifest.toml`.
     pub manifest: Manifest,
@@ -567,15 +567,22 @@ pub struct PluginHost {
 }
 
 impl PluginHost {
-    /// Discover plugins in the user's data directory and the system data
-    /// directories (`$XDG_DATA_DIRS`, so distro packages under
-    /// `/usr/share/jump/plugins` are picked up with no configuration).
+    /// Discover plugins in [`Self::roots`].
+    #[must_use]
+    pub fn discover() -> Self {
+        Self::discover_in(&Self::roots())
+    }
+
+    /// Where plugins are discovered, in shadowing order: the user's data
+    /// directory, then the system data directories (`$XDG_DATA_DIRS`, so
+    /// distro packages under `/usr/share/jump/plugins` are picked up with no
+    /// configuration).
     ///
     /// The user's directory is searched first and wins on an id collision, so
     /// copying a packaged plugin into `~/.local/share/jump/plugins` to modify
     /// it shadows the packaged one rather than duplicating it.
     #[must_use]
-    pub fn discover() -> Self {
+    pub fn roots() -> Vec<PathBuf> {
         let mut roots: Vec<PathBuf> = dirs::data_dir()
             .map(|dir| dir.join("jump").join("plugins"))
             .into_iter()
@@ -597,8 +604,7 @@ impl PluginHost {
                 .into_iter()
                 .map(|dir| dir.join("jump").join("plugins")),
         );
-
-        Self::discover_in(&roots)
+        roots
     }
 
     /// Discover plugins under `roots`, earlier roots shadowing later ones.
@@ -670,6 +676,17 @@ impl PluginHost {
             disabled: std::collections::HashSet::new(),
             keyword_overrides: std::collections::HashMap::new(),
         }
+    }
+
+    /// Take the plugins from a fresh discovery, keeping the user's disabled
+    /// set and keyword overrides, which belong to settings rather than to
+    /// what is on disk. Returns whether the plugin set actually changed.
+    pub fn replace_plugins(&mut self, discovered: Self) -> bool {
+        if self.plugins == discovered.plugins {
+            return false;
+        }
+        self.plugins = discovered.plugins;
+        true
     }
 
     /// Replace the set of switched-off plugins, e.g. when settings change.
@@ -1332,6 +1349,38 @@ mod tests {
         // The user's copy shadowed the packaged one.
         let shared = host.get("shared").expect("shared plugin");
         assert_eq!(shared.manifest.name, "User copy");
+    }
+
+    #[test]
+    fn a_fresh_discovery_keeps_the_users_settings() {
+        // Rediscovery replaces what is on disk, never what the user chose:
+        // a switched-off plugin must stay off, and an alias must survive.
+        let root = tempfile::tempdir().expect("tempdir");
+        let write = |id: &str| {
+            let dir = root.path().join(id);
+            std::fs::create_dir_all(&dir).expect("plugin dir");
+            std::fs::write(
+                dir.join("manifest.toml"),
+                "name = \"P\"\nkeyword = \"p\"\nquery = \"./q\"\n",
+            )
+            .expect("manifest");
+        };
+        write("old");
+        let roots = [root.path().to_path_buf()];
+        let mut host = PluginHost::discover_in(&roots);
+        host.set_disabled(["old"]);
+        host.set_keyword_overrides([("new", "n")]);
+
+        assert!(!host.replace_plugins(PluginHost::discover_in(&roots)));
+
+        write("new");
+        assert!(host.replace_plugins(PluginHost::discover_in(&roots)));
+        assert!(
+            host.get("old").is_none(),
+            "the disabled plugin came back on"
+        );
+        let new = host.get("new").expect("the new plugin was picked up");
+        assert_eq!(host.effective_keyword(new), Some("n"));
     }
 
     #[test]

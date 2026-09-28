@@ -14,8 +14,9 @@ git clone <url> ~/.local/share/jump/plugins/<name>
 jump plugin lint <name>          # checks the manifest and one sample query
 ```
 
-Then type its keyword. Nothing needs restarting — plugins are discovered per
-query.
+Then type its keyword. Nothing needs restarting — `jump` and Jump Settings
+watch the plugin directories and pick a plugin up as soon as its
+`manifest.toml` appears.
 
 Distribution packages install into `/usr/share/jump/plugins/<name>` instead,
 which `jump` also searches. A plugin of the same name in the user's directory

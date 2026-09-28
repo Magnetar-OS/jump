@@ -65,6 +65,11 @@ tempfile = "3.27.0"
 # hardcoded; this is the same source cosmic-app-library and cosmic-launcher use.
 switcheroo-control = { git = "https://github.com/pop-os/dbus-settings-bindings" }
 
+# Plugin directories are watched so a newly installed plugin works without a
+# restart. Already in the tree through cosmic-config, which watches its store
+# the same way.
+notify = "8.2.0"
+
 # Settings live in cosmic-config; `dirs` is still needed for index and history
 # paths under the XDG data directory.
 dirs = "7.0"

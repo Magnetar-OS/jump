@@ -96,6 +96,8 @@ pub enum Message {
     /// A plugin's `rerun` timer fired: run `query` against the plugins again
     /// if the user is still looking at it.
     RerunPlugins(String),
+    /// The plugin directories changed and were rediscovered.
+    PluginsDiscovered(PluginHost),
     /// File-search results for `query`, which may already be stale.
     FileResults { query: String, items: Vec<Item> },
     /// The file index finished (re)building.
@@ -1426,6 +1428,19 @@ impl cosmic::Application for App {
                 query_plugins(self.plugins.clone(), query)
             }
 
+            Message::PluginsDiscovered(host) => {
+                if !self.plugins.replace_plugins(host) {
+                    return Task::none();
+                }
+                tracing::info!("plugin set changed");
+                // The query on screen was answered by the old set; a plugin
+                // installed for it (or removed from under it) should show.
+                if self.surface.is_some() && !self.dismissing && !self.input.is_empty() {
+                    return self.search(self.input.clone());
+                }
+                Task::none()
+            }
+
             Message::IndexReady(files) => {
                 let ready = files.is_ready();
                 tracing::info!(ready, "file index available");
@@ -1907,6 +1922,8 @@ impl cosmic::Application for App {
             Subscription::run(clipboard_stream),
             // Status-area icon, when a notifier host is running.
             Subscription::run(tray_stream),
+            // Plugins installed, removed or edited while the daemon runs.
+            Subscription::run(jump::plugins::watch).map(Message::PluginsDiscovered),
             // Settings changes, delivered by cosmic-config without a restart.
             // `watch_config` already filters to the struct's own keys and only
             // emits when a value actually changed; with the `dbus-config`

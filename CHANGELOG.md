@@ -32,6 +32,10 @@ All notable changes to this project are documented here. The format follows
   is detected before anything is written, and two filters sharing a keyword
   both import. A workflow can no longer make the importer read a script or
   icon from outside the bundle (`../`, absolute paths, symlinks, devices).
+- A plugin installed, removed or edited while Jump runs takes effect without
+  restarting it, as `jump plugin new` and the plugin guide always promised:
+  the launcher and Jump Settings watch the plugin directories, and an open
+  query is re-run when the plugin set changes.
 
 ## [1.1.1] - 2026-09-22
 

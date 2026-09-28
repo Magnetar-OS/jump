@@ -11,6 +11,7 @@
 
 pub mod config;
 pub mod localize;
+pub mod plugins;
 
 /// Reverse-DNS identifier, used for the D-Bus name and the config store.
 pub const APP_ID: &str = "com.magnetaros.Jump";
