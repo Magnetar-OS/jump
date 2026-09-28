@@ -372,10 +372,18 @@ fn filter_keyword(filter: &plist::Dictionary, warnings: &mut Vec<String>) -> Opt
     // Alfred allows `{var:…}` templates in keywords; jump keywords are
     // literal. The plugin still imports — as an always-on plugin — but the
     // difference is worth a warning.
+    // Nor can a keyword with a space in it ever match.
     match keyword {
         Some(keyword) if keyword.contains('{') => {
             warnings.push(format!(
                 "keyword {keyword:?} is templated; imported without a keyword — set one in \
+                 manifest.toml"
+            ));
+            None
+        }
+        Some(keyword) if !jump_core::plugin::is_keyword(&keyword) => {
+            warnings.push(format!(
+                "keyword {keyword:?} is not one word; imported without a keyword — set one in \
                  manifest.toml"
             ));
             None
@@ -811,6 +819,22 @@ mod tests {
         )
         .expect("manifest parses");
         assert_eq!(manifest.timeout_ms, None);
+    }
+
+    #[test]
+    fn a_keyword_that_could_never_match_is_not_imported_as_one() {
+        let (_root, workflow, plugins) = workspace();
+        let fixture = FIXTURE.replace("<string>gh</string>", "<string>gh search</string>");
+        std::fs::write(workflow.join("info.plist"), fixture).expect("fixture");
+
+        let import = import(&workflow, &plugins).expect("import succeeds");
+        assert_eq!(import.plugins[0].keyword, None);
+        assert!(
+            import
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("not one word"))
+        );
     }
 
     #[test]

@@ -204,6 +204,15 @@ impl Drop for GroupKill {
     }
 }
 
+/// Whether `text` can be a plugin keyword: one non-empty word. A keyword is
+/// matched up to the first space of the query, so one containing whitespace
+/// could never match. The manifest, the Settings override and the Alfred
+/// importer all hold keywords to this.
+#[must_use]
+pub fn is_keyword(text: &str) -> bool {
+    !text.is_empty() && !text.contains(char::is_whitespace)
+}
+
 /// Parsed `manifest.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Manifest {
@@ -883,7 +892,7 @@ pub async fn lint(directory: &Path, sample_query: &str) -> LintReport {
     };
 
     if let Some(keyword) = manifest.keyword.as_deref() {
-        if keyword.is_empty() || keyword.contains(char::is_whitespace) {
+        if !is_keyword(keyword) {
             report.errors.push(format!(
                 "keyword {keyword:?} must be one non-empty word — it is matched \
                  up to the first space of the query"
@@ -1132,6 +1141,15 @@ mod tests {
     #[test]
     fn bare_keyword_yields_empty_query() {
         assert_eq!(plugin(Some("gh")).match_query("gh"), Some(""));
+    }
+
+    #[test]
+    fn a_keyword_is_one_non_empty_word() {
+        assert!(is_keyword("gh"));
+        assert!(is_keyword("=="));
+        for bad in ["", "gh x", " gh", "gh\t"] {
+            assert!(!is_keyword(bad), "{bad:?}");
+        }
     }
 
     #[test]

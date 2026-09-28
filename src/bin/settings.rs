@@ -197,6 +197,12 @@ impl cosmic::Application for App {
             Message::RefreshHours(value) => next.files.refresh_hours = value as u64,
             Message::PluginKeyword(id, keyword) => {
                 let keyword = keyword.trim().to_owned();
+                // The same rule `jump plugin lint` applies to a manifest: a
+                // keyword with a space in it could never match, so the space
+                // is not taken rather than saved.
+                if !keyword.is_empty() && !jump_core::plugin::is_keyword(&keyword) {
+                    return Task::none();
+                }
                 next.plugin_keywords.retain(|(entry, _)| entry != &id);
                 // An empty field means "no override", not "no keyword": the
                 // manifest's own keyword comes back rather than the plugin

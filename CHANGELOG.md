@@ -64,6 +64,10 @@ All notable changes to this project are documented here. The format follows
   an unparseable manifest or a broken script, the sample script's JSON
   output is escaped, and a name such as `../x` that cannot name a directory
   inside the plugin folder is refused.
+- A plugin keyword is held to one rule everywhere: Jump Settings no longer
+  saves a keyword override containing a space, which could never match, and
+  `jump plugin import` imports such an Alfred keyword without a keyword and
+  says so, as `jump plugin lint` already reported for manifests.
 
 ## [1.1.1] - 2026-09-22
 
