@@ -69,7 +69,129 @@ const QUERY_TIMEOUT: Duration = Duration::from_millis(180);
 const MAX_QUERY_TIMEOUT: Duration = Duration::from_millis(3000);
 
 /// Ceiling on a plugin's stdout, so a runaway script cannot exhaust memory.
+///
+/// Enforced while reading: a plugin is cut off at this many bytes, never
+/// buffered in full first.
 const MAX_OUTPUT_BYTES: usize = 1 << 20;
+
+/// How much of a plugin's stderr is kept for the log line or lint report.
+/// The rest is read and discarded, so a chatty plugin cannot stall on a full
+/// pipe.
+const MAX_STDERR_BYTES: usize = 16 << 10;
+
+/// Why a query command produced no output to parse.
+#[derive(Debug, thiserror::Error)]
+enum RunError {
+    #[error("failed to run: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("exceeded its {} ms deadline and was killed", .0.as_millis())]
+    Deadline(Duration),
+    #[error("printed more than {MAX_OUTPUT_BYTES} bytes and was killed")]
+    TooLarge,
+    #[error("exited {status}; stderr: {stderr}")]
+    Failed {
+        status: std::process::ExitStatus,
+        stderr: String,
+    },
+}
+
+/// Run a query command under `deadline` and the output cap, returning its
+/// stdout.
+///
+/// The command leads its own process group, and overrunning either limit
+/// kills the whole group: a shell script's background jobs are part of the
+/// query that started them, and must not outlive its dropped results. A
+/// command that finishes in time keeps anything it deliberately left behind
+/// (a cache refresh with its output redirected, say).
+async fn run_query(
+    program: &Path,
+    directory: &Path,
+    text: &str,
+    deadline: Duration,
+) -> Result<Vec<u8>, RunError> {
+    use tokio::io::AsyncReadExt;
+
+    let mut child = Command::new(program)
+        .arg(text)
+        .current_dir(directory)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .kill_on_drop(true)
+        .spawn()?;
+    // The group id is the child's pid, which cannot be reused before the
+    // child is reaped — and it is only reaped on the success path below.
+    let group = child.id();
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let stderr = child.stderr.take().expect("stderr is piped");
+
+    // Drained on its own task so it progresses while stdout is read, and
+    // ends when the group is killed and the pipe closes.
+    let stderr = tokio::spawn(async move {
+        let mut kept = Vec::new();
+        let mut limited = stderr.take(MAX_STDERR_BYTES as u64);
+        let read = limited.read_to_end(&mut kept).await;
+        let drained = tokio::io::copy(&mut limited.into_inner(), &mut tokio::io::sink()).await;
+        if let Err(error) = read.and(drained) {
+            tracing::debug!(%error, "plugin stderr read failed");
+        }
+        String::from_utf8_lossy(&kept).trim().to_owned()
+    });
+
+    let run = async {
+        let mut output = Vec::new();
+        stdout
+            .take(MAX_OUTPUT_BYTES as u64 + 1)
+            .read_to_end(&mut output)
+            .await?;
+        if output.len() > MAX_OUTPUT_BYTES {
+            return Err(RunError::TooLarge);
+        }
+        let status = child.wait().await?;
+        Ok((status, output))
+    };
+
+    match tokio::time::timeout(deadline, run).await {
+        Ok(Ok((status, output))) if status.success() => Ok(output),
+        Ok(Ok((status, _))) => Err(RunError::Failed {
+            status,
+            stderr: stderr.await.unwrap_or_default(),
+        }),
+        Ok(Err(error)) => {
+            kill_group(group).await;
+            Err(error)
+        }
+        Err(_) => {
+            kill_group(group).await;
+            Err(RunError::Deadline(deadline))
+        }
+    }
+}
+
+/// `SIGKILL` a plugin's whole process group.
+///
+/// Through `kill(1)`, as [`crate::process::terminate`] does, rather than a
+/// syscall binding: this runs only when a plugin has already misbehaved.
+/// The leader itself is also killed by `kill_on_drop`, so a failure here
+/// costs the stragglers, not the deadline.
+async fn kill_group(group: Option<u32>) {
+    let Some(group) = group else {
+        return;
+    };
+    let result = Command::new("kill")
+        .args(["-KILL", "--", &format!("-{group}")])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await;
+    match result {
+        Ok(status) if status.success() => {}
+        Ok(status) => tracing::warn!(group, ?status, "could not kill plugin process group"),
+        Err(error) => tracing::warn!(group, %error, "could not run kill for plugin process group"),
+    }
+}
 
 /// Parsed `manifest.toml`.
 #[derive(Debug, Clone, Deserialize)]
@@ -291,44 +413,16 @@ impl Plugin {
     async fn query(&self, text: &str) -> (Vec<Item>, Option<Duration>) {
         let program = self.resolve(&self.manifest.query);
 
-        let child = Command::new(&program)
-            .arg(text)
-            .current_dir(&self.directory)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .output();
-
-        let deadline = self.manifest.timeout();
-        let output = match tokio::time::timeout(deadline, child).await {
-            Ok(Ok(output)) => output,
-            Ok(Err(error)) => {
-                tracing::warn!(plugin = %self.id, ?program, %error, "plugin failed to run");
-                return (Vec::new(), None);
-            }
-            Err(_) => {
-                tracing::warn!(
-                    plugin = %self.id,
-                    timeout_ms = deadline.as_millis(),
-                    "plugin exceeded its deadline; dropping results"
-                );
+        let stdout = match run_query(&program, &self.directory, text, self.manifest.timeout()).await
+        {
+            Ok(stdout) => stdout,
+            Err(error) => {
+                tracing::warn!(plugin = %self.id, ?program, %error, "plugin query dropped");
                 return (Vec::new(), None);
             }
         };
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            tracing::warn!(plugin = %self.id, status = ?output.status, %stderr, "plugin exited non-zero");
-            return (Vec::new(), None);
-        }
-
-        if output.stdout.len() > MAX_OUTPUT_BYTES {
-            tracing::warn!(plugin = %self.id, bytes = output.stdout.len(), "plugin output too large");
-            return (Vec::new(), None);
-        }
-
-        let response: PluginResponse = match serde_json::from_slice(&output.stdout) {
+        let response: PluginResponse = match serde_json::from_slice(&stdout) {
             Ok(response) => response,
             Err(error) => {
                 tracing::warn!(plugin = %self.id, %error, "plugin emitted invalid JSON");
@@ -816,47 +910,23 @@ pub async fn lint(directory: &Path, sample_query: &str) -> LintReport {
             .unwrap_or("plugin")
             .to_owned(),
     };
-    let deadline = plugin.manifest.timeout();
-    let program = plugin.directory.join(&plugin.manifest.query);
-    let output = match tokio::time::timeout(
-        deadline,
-        Command::new(&program)
-            .arg(sample_query)
-            .current_dir(&plugin.directory)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .output(),
+    let program = plugin.resolve(&plugin.manifest.query);
+    let stdout = match run_query(
+        &program,
+        &plugin.directory,
+        sample_query,
+        plugin.manifest.timeout(),
     )
     .await
     {
-        Ok(Ok(output)) => output,
-        Ok(Err(error)) => {
-            report
-                .errors
-                .push(format!("query command failed to run: {error}"));
-            return report;
-        }
-        Err(_) => {
-            report.errors.push(format!(
-                "query command exceeded its {} ms deadline and was killed",
-                deadline.as_millis()
-            ));
+        Ok(stdout) => stdout,
+        Err(error) => {
+            report.errors.push(format!("query command {error}"));
             return report;
         }
     };
 
-    if !output.status.success() {
-        report.errors.push(format!(
-            "query command exited {:?}; stderr: {}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-        return report;
-    }
-
-    match serde_json::from_slice::<PluginResponse>(&output.stdout) {
+    match serde_json::from_slice::<PluginResponse>(&stdout) {
         Ok(response) => {
             report.items = response.items.len();
             if response.items.is_empty() {
@@ -1127,6 +1197,107 @@ mod tests {
         .expect("manifest");
         let report = lint(&directory, "x").await;
         assert_eq!(report.errors.len(), 2, "{:?}", report.errors);
+    }
+
+    /// A plugin in a fresh directory whose query command is `script`.
+    fn scripted(root: &Path, script: &str, timeout_ms: Option<u64>) -> Plugin {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = root.join("q");
+        std::fs::write(&path, script).expect("script");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let mut plugin = plugin(Some("t"));
+        plugin.directory = root.to_path_buf();
+        plugin.manifest.timeout_ms = timeout_ms;
+        plugin
+    }
+
+    /// Whether `pid` is still a running process (a zombie counts as gone).
+    fn alive(pid: u32) -> bool {
+        std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+            stat.rsplit(") ")
+                .next()
+                .is_some_and(|rest| !rest.starts_with('Z'))
+        })
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn oversized_output_is_refused_without_waiting_for_the_deadline() {
+        // The cap is a memory bound, so it has to be enforced while reading:
+        // a plugin that has already printed more than the cap is cut off
+        // there, not buffered in full until it exits or the deadline fires.
+        let root = tempfile::tempdir().expect("tempdir");
+        let plugin = scripted(
+            root.path(),
+            "#!/bin/sh\nhead -c 2000000 /dev/zero\nsleep 5\n",
+            Some(3000),
+        );
+
+        let started = std::time::Instant::now();
+        let (items, _) = plugin.query("x").await;
+        assert!(items.is_empty());
+        assert!(
+            started.elapsed() < Duration::from_millis(1500),
+            "took {:?}: output was buffered until the deadline",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_overrunning_plugin_is_killed_with_its_children() {
+        // "Killed" has to mean everything the plugin started for this query,
+        // not just the script: a shell's background job would otherwise keep
+        // running, detached, after its results were dropped.
+        let root = tempfile::tempdir().expect("tempdir");
+        let plugin = scripted(
+            root.path(),
+            "#!/bin/sh\nsleep 30 &\necho $! > child.pid\nwait\n",
+            Some(100),
+        );
+
+        let (items, _) = plugin.query("x").await;
+        assert!(items.is_empty());
+
+        let pid: u32 = std::fs::read_to_string(root.path().join("child.pid"))
+            .expect("the script recorded its child")
+            .trim()
+            .parse()
+            .expect("pid");
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while alive(pid) && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let survived = alive(pid);
+        if survived {
+            // Do not leave the stray behind for the rest of the suite.
+            let _ = std::process::Command::new("kill")
+                .args(["-KILL", &pid.to_string()])
+                .status();
+        }
+        assert!(!survived, "the plugin's child outlived the deadline");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn lint_applies_the_launchers_output_cap() {
+        // Lint promises to run the plugin exactly the way the launcher does,
+        // so output the launcher would drop cannot lint clean.
+        let root = tempfile::tempdir().expect("tempdir");
+        let directory = root.path().join("big");
+        std::fs::create_dir_all(&directory).expect("dir");
+        std::fs::write(
+            directory.join("manifest.toml"),
+            "name = \"Big\"\nkeyword = \"big\"\nquery = \"./q\"\n",
+        )
+        .expect("manifest");
+        scripted(
+            &directory,
+            "#!/bin/sh\nprintf '{\"items\":[{\"uid\":\"a\",\"title\":\"'\n\
+             head -c 1100000 /dev/zero | tr '\\0' a\nprintf '\"}]}'\n",
+            None,
+        );
+
+        let report = lint(&directory, "x").await;
+        assert!(!report.is_clean(), "oversized output linted clean");
     }
 
     #[test]

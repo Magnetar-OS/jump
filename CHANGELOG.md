@@ -11,6 +11,14 @@ All notable changes to this project are documented here. The format follows
 - Jump Settings is categorised as desktop settings rather than the bare
   `Settings` category.
 
+### Fixed
+
+- A plugin that overruns its deadline or output cap is killed together with
+  its process group, not just the script itself; background jobs no longer
+  outlive the query. The 1 MiB output cap is enforced while reading, so
+  a runaway plugin is cut off at the cap instead of being buffered in full
+  until its deadline. `jump plugin lint` applies the same cap.
+
 ## [1.1.1] - 2026-09-22
 
 ### Changed
