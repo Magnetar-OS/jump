@@ -93,22 +93,18 @@ fn plugin_cli(arguments: &[String]) -> ! {
 
     let code = match arguments.first().map(String::as_str) {
         Some("new") => match arguments.get(1) {
-            Some(name) => {
-                let keyword = name.to_lowercase().replace(char::is_whitespace, "-");
-                let directory = user_plugins().join(&keyword);
-                match jump_core::plugin::scaffold(&directory, name) {
-                    Ok(()) => {
-                        println!("Created {}", directory.display());
-                        println!("Try it: type “{keyword} hello” in the launcher.");
-                        println!("Check it: jump plugin lint {}", directory.display());
-                        0
-                    }
-                    Err(error) => {
-                        eprintln!("error: {error}");
-                        1
-                    }
+            Some(name) => match jump_core::plugin::scaffold(&user_plugins(), name) {
+                Ok((directory, keyword)) => {
+                    println!("Created {}", directory.display());
+                    println!("Try it: type “{keyword} hello” in the launcher.");
+                    println!("Check it: jump plugin lint {}", directory.display());
+                    0
                 }
-            }
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    1
+                }
+            },
             None => {
                 eprintln!("usage: jump plugin new <name>");
                 2

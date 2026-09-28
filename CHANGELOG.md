@@ -60,6 +60,10 @@ All notable changes to this project are documented here. The format follows
 - Activating a result that nothing can act on any more — a plugin switched
   off since the query, the launcher service down, no clipboard backend — no
   longer counts as a use for ranking, and is logged.
+- `jump plugin new` accepts any name: quotes, `%` and `'` no longer produce
+  an unparseable manifest or a broken script, the sample script's JSON
+  output is escaped, and a name such as `../x` that cannot name a directory
+  inside the plugin folder is refused.
 
 ## [1.1.1] - 2026-09-22
 

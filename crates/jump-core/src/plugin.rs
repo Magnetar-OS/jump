@@ -1000,38 +1000,73 @@ pub async fn lint(directory: &Path, sample_query: &str) -> LintReport {
     report
 }
 
-/// Write a runnable plugin skeleton into `directory`.
+/// The keyword, and plugin directory name, `jump plugin new <name>` derives
+/// from `name`: lowercased, with runs of whitespace joined by dashes.
+///
+/// `None` when that cannot name a directory inside the plugin root — empty,
+/// hidden, or containing a path separator — so `../x` cannot scaffold
+/// outside it.
+#[must_use]
+pub fn scaffold_keyword(name: &str) -> Option<String> {
+    let keyword = name
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-");
+    let usable =
+        !keyword.is_empty() && !keyword.starts_with('.') && !keyword.contains(['/', '\\', '\0']);
+    usable.then_some(keyword)
+}
+
+/// Write a runnable plugin skeleton for `name` into a new directory under
+/// `root`, named by [`scaffold_keyword`]. Returns the directory and the
+/// keyword.
 ///
 /// Refuses to touch a directory that already exists — a scaffolder that can
-/// overwrite a real plugin is a footgun, not a convenience.
+/// overwrite a real plugin is a footgun, not a convenience. `name` is
+/// arbitrary user text, so it reaches the manifest as an escaped TOML string
+/// and the script as a quoted shell variable, never as syntax.
 ///
 /// # Errors
 ///
-/// [`std::io::ErrorKind::AlreadyExists`] if `directory` is already there, and
-/// any I/O error from creating the directory or writing the files in it.
-pub fn scaffold(directory: &Path, name: &str) -> std::io::Result<()> {
+/// [`std::io::ErrorKind::InvalidInput`] if `name` yields no usable
+/// directory name, [`std::io::ErrorKind::AlreadyExists`] if the directory is
+/// already there, and any I/O error from creating the directory or writing
+/// the files in it.
+pub fn scaffold(root: &Path, name: &str) -> std::io::Result<(PathBuf, String)> {
+    let Some(keyword) = scaffold_keyword(name) else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("{name:?} does not make a plugin directory name"),
+        ));
+    };
+    let directory = root.join(&keyword);
     if directory.exists() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::AlreadyExists,
             format!("{} already exists", directory.display()),
         ));
     }
-    std::fs::create_dir_all(directory)?;
+    std::fs::create_dir_all(&directory)?;
 
-    let keyword = name.to_lowercase().replace(char::is_whitespace, "-");
+    let toml_string = |text: &str| toml::Value::String(text.to_owned()).to_string();
     std::fs::write(
         directory.join("manifest.toml"),
         format!(
-            "name = \"{name}\"\n\
+            "name = {}\n\
              description = \"Describe what this plugin searches\"\n\
-             keyword = \"{keyword}\"\n\
+             keyword = {}\n\
              query = \"./search.sh\"\n\
              # activate = \"./open.sh\"   # separate action command, optional\n\
              icon = \"system-search-symbolic\"\n\
-             # timeout_ms = 1000          # up to 3000 for slow keyworded plugins\n"
+             # timeout_ms = 1000          # up to 3000 for slow keyworded plugins\n",
+            toml_string(name),
+            toml_string(&keyword),
         ),
     )?;
 
+    // Single-quoted for the shell: only a quote itself needs escaping there.
+    let shell_name = name.replace('\'', r"'\''");
     let script = directory.join("search.sh");
     std::fs::write(
         &script,
@@ -1046,10 +1081,14 @@ pub fn scaffold(directory: &Path, name: &str) -> std::io::Result<()> {
              \texit 0\n\
              fi\n\
              \n\
+             name='{shell_name}'\n\
              query=\"$1\"\n\
+             # Text going into a JSON string needs its backslashes and quotes\n\
+             # escaped.\n\
+             json() {{ printf '%s' \"$1\" | sed 's/[\\\\\"]/\\\\&/g'; }}\n\
              printf '{{\"items\":[{{\"uid\":\"hello\",\"title\":\"Hello %s\",\
-             \"subtitle\":\"{name}\",\"arg\":\"%s\"}}]}}' \
-             \"${{query:-world}}\" \"$query\"\n"
+             \"subtitle\":\"%s\",\"arg\":\"%s\"}}]}}' \
+             \"$(json \"${{query:-world}}\")\" \"$(json \"$name\")\" \"$(json \"$query\")\"\n"
         ),
     )?;
     #[cfg(unix)]
@@ -1057,7 +1096,7 @@ pub fn scaffold(directory: &Path, name: &str) -> std::io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
     }
-    Ok(())
+    Ok((directory, keyword))
 }
 
 #[cfg(test)]
@@ -1250,16 +1289,55 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn scaffold_produces_a_plugin_that_lints_clean() {
         let root = tempfile::tempdir().expect("tempdir");
-        let directory = root.path().join("demo");
 
-        scaffold(&directory, "Demo").expect("scaffold succeeds");
+        let (directory, keyword) = scaffold(root.path(), "Demo").expect("scaffold succeeds");
+        assert_eq!(directory, root.path().join("demo"));
+        assert_eq!(keyword, "demo");
         // Refuses to overwrite what it just made.
-        assert!(scaffold(&directory, "Demo").is_err());
+        assert!(scaffold(root.path(), "Demo").is_err());
 
         let report = lint(&directory, "hello").await;
         assert!(report.is_clean(), "unexpected errors: {:?}", report.errors);
         assert_eq!(report.items, 1);
         assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_scaffold_name_is_data_not_syntax() {
+        // The name is whatever the user typed; quotes, `%` and `'` must reach
+        // the manifest and the output as text, not break either.
+        let root = tempfile::tempdir().expect("tempdir");
+        let name = r#"It's "100%" done"#;
+        let (directory, keyword) = scaffold(root.path(), name).expect("scaffold succeeds");
+        assert_eq!(keyword, r#"it's-"100%"-done"#);
+
+        let manifest: Manifest = toml::from_str(
+            &std::fs::read_to_string(directory.join("manifest.toml")).expect("manifest"),
+        )
+        .expect("the manifest parses");
+        assert_eq!(manifest.name, name);
+
+        let output = std::process::Command::new(directory.join("search.sh"))
+            .arg(r#"say "hi" \"#)
+            .output()
+            .expect("the script runs");
+        let response: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("the output is JSON");
+        let item = &response["items"][0];
+        assert_eq!(item["subtitle"], name);
+        assert_eq!(item["title"], r#"Hello say "hi" \"#);
+    }
+
+    #[test]
+    fn a_scaffold_cannot_name_a_directory_outside_the_root() {
+        for name in ["../x", "a/b", ".hidden", "   ", ""] {
+            assert_eq!(scaffold_keyword(name), None, "{name:?}");
+        }
+        assert_eq!(scaffold_keyword("My  Plugin").as_deref(), Some("my-plugin"));
+        let root = tempfile::tempdir().expect("tempdir");
+        let error = scaffold(&root.path().join("plugins"), "../x").expect_err("refused");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(!root.path().join("x").exists());
     }
 
     #[tokio::test(flavor = "multi_thread")]
