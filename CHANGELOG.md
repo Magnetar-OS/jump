@@ -24,6 +24,9 @@ All notable changes to this project are documented here. The format follows
   pushed exact filename matches below weaker content matches. A streaming
   plugin's rerun replaces its rows instead of adding a second copy, and
   content search stays out of a query a keyworded plugin has claimed.
+- Changing a setting in Jump Settings no longer undoes a result pinned in the
+  launcher, or a key edited by hand, since the window opened: it writes only
+  the setting that changed, and follows changes made elsewhere.
 
 ## [1.1.1] - 2026-09-22
 

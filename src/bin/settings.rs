@@ -19,7 +19,7 @@ use std::sync::LazyLock;
 
 use cosmic::app::{Core, Settings, Task};
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
-use cosmic::iced::Length;
+use cosmic::iced::{Length, Subscription};
 use cosmic::widget::{self, settings};
 use cosmic::{Apply, Element};
 use jump::config::{Config, GridLayout, ScrollMode};
@@ -87,6 +87,8 @@ enum Message {
     PluginKeyword(String, String),
     /// Unpin the favorite with this result key.
     UnpinFavorite(String),
+    /// The store changed — here, in the launcher (a pin), or by hand.
+    ConfigChanged(Box<Config>),
 }
 
 /// Which provider a [`Message::Provider`] refers to.
@@ -164,11 +166,12 @@ impl cosmic::Application for App {
     }
 
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
+        let mut next = self.config.clone();
         match message {
-            Message::Blur(value) => self.config.blur = value,
-            Message::ReduceMotion(value) => self.config.reduce_motion = value,
+            Message::Blur(value) => next.blur = value,
+            Message::ReduceMotion(value) => next.reduce_motion = value,
             Message::Provider(provider, value) => {
-                let providers = &mut self.config.providers;
+                let providers = &mut next.providers;
                 match provider {
                     Provider::Windows => providers.windows = value,
                     Provider::System => providers.system = value,
@@ -179,56 +182,71 @@ impl cosmic::Application for App {
                     Provider::Calculator => providers.calculator = value,
                 }
             }
-            Message::Opacity(value) => self.config.opacity = value,
-            Message::BackdropOpacity(value) => self.config.fullscreen_opacity = value,
-            Message::CellSize(value) => self.config.cell_size = value,
-            Message::GridWidth(value) => self.config.grid_max_width = value,
+            Message::Opacity(value) => next.opacity = value,
+            Message::BackdropOpacity(value) => next.fullscreen_opacity = value,
+            Message::CellSize(value) => next.cell_size = value,
+            Message::GridWidth(value) => next.grid_max_width = value,
             Message::Layout(index) => {
-                self.config.grid_layout = match index {
+                next.grid_layout = match index {
                     1 => GridLayout::Panel,
                     _ => GridLayout::Fullscreen,
                 };
             }
             Message::Scroll(index) => {
-                self.config.scroll = match index {
+                next.scroll = match index {
                     0 => ScrollMode::Continuous,
                     2 => ScrollMode::PageVertical,
                     _ => ScrollMode::PageHorizontal,
                 };
             }
-            Message::FilesEnabled(value) => self.config.files.enabled = value,
-            Message::ExternalDrives(value) => self.config.files.external_drives = value,
-            Message::Content(value) => self.config.files.content = value,
-            Message::ContentMaxMb(value) => self.config.files.content_max_mb = value as u64,
-            Message::RefreshHours(value) => self.config.files.refresh_hours = value as u64,
+            Message::FilesEnabled(value) => next.files.enabled = value,
+            Message::ExternalDrives(value) => next.files.external_drives = value,
+            Message::Content(value) => next.files.content = value,
+            Message::ContentMaxMb(value) => next.files.content_max_mb = value as u64,
+            Message::RefreshHours(value) => next.files.refresh_hours = value as u64,
             Message::PluginKeyword(id, keyword) => {
                 let keyword = keyword.trim().to_owned();
-                self.config
-                    .plugin_keywords
-                    .retain(|(entry, _)| entry != &id);
+                next.plugin_keywords.retain(|(entry, _)| entry != &id);
                 // An empty field means "no override", not "no keyword": the
                 // manifest's own keyword comes back rather than the plugin
                 // silently starting to answer every keystroke.
                 if !keyword.is_empty() {
-                    self.config.plugin_keywords.push((id, keyword));
+                    next.plugin_keywords.push((id, keyword));
                 }
             }
 
             Message::UnpinFavorite(key) => {
-                self.config.favorites.retain(|entry| entry != &key);
+                next.favorites.retain(|entry| entry != &key);
             }
 
             Message::PluginEnabled(id, enabled) => {
                 if enabled {
-                    self.config.disabled_plugins.retain(|entry| entry != &id);
-                } else if !self.config.disabled_plugins.contains(&id) {
-                    self.config.disabled_plugins.push(id);
+                    next.disabled_plugins.retain(|entry| entry != &id);
+                } else if !next.disabled_plugins.contains(&id) {
+                    next.disabled_plugins.push(id);
                 }
+            }
+            // Kept current so each change starts from what is stored now, not
+            // from what was stored when the window opened. Nothing to write.
+            Message::ConfigChanged(config) => {
+                self.config = *config;
+                return Task::none();
             }
         }
 
-        self.save();
+        self.save(next);
         Task::none()
+    }
+
+    fn subscription(&self) -> Subscription<Self::Message> {
+        self.core()
+            .watch_config::<Config>(jump::APP_ID)
+            .map(|update| {
+                for error in update.errors {
+                    tracing::warn!(%error, "ignoring an unreadable setting");
+                }
+                Message::ConfigChanged(Box::new(update.config))
+            })
     }
 
     // One section builder per settings group; splitting it would only scatter
@@ -475,19 +493,71 @@ impl cosmic::Application for App {
 }
 
 impl App {
-    /// Persist the whole entry.
+    /// Apply `next` and persist it.
     ///
     /// Written on every change rather than behind an apply button: the launcher
     /// reloads live, so a change the user makes is visible the moment they make
     /// it, and an apply button would only be a way to make that not happen.
-    fn save(&self) {
-        let Some(handle) = self.handle.as_ref() else {
-            return;
-        };
-        if let Err(error) = self.config.write_entry(handle) {
-            tracing::error!(%error, "could not save settings");
+    fn save(&mut self, next: Config) {
+        match self.handle.as_ref() {
+            Some(handle) => {
+                for error in persist(&mut self.config, handle, next) {
+                    tracing::error!(%error, "could not save settings");
+                }
+            }
+            None => self.config = next,
         }
     }
+}
+
+/// Make `current` into `next`, writing only the keys that differ.
+///
+/// Never the whole entry: this window's copy of every other key is a
+/// snapshot from when it opened, and writing it back would undo whatever
+/// changed since — a result the launcher pinned, a key edited by hand. The
+/// destructuring is exhaustive so a new field cannot be left unsaved.
+fn persist(
+    current: &mut Config,
+    handle: &cosmic_config::Config,
+    next: Config,
+) -> Vec<cosmic_config::Error> {
+    let Config {
+        scroll,
+        reduce_motion,
+        blur,
+        opacity,
+        fullscreen_opacity,
+        grid_layout,
+        cell_size,
+        grid_max_width,
+        disabled_plugins,
+        files,
+        providers,
+        quicklinks,
+        fallbacks,
+        favorites,
+        plugin_keywords,
+    } = next;
+    [
+        current.set_scroll(handle, scroll),
+        current.set_reduce_motion(handle, reduce_motion),
+        current.set_blur(handle, blur),
+        current.set_opacity(handle, opacity),
+        current.set_fullscreen_opacity(handle, fullscreen_opacity),
+        current.set_grid_layout(handle, grid_layout),
+        current.set_cell_size(handle, cell_size),
+        current.set_grid_max_width(handle, grid_max_width),
+        current.set_disabled_plugins(handle, disabled_plugins),
+        current.set_files(handle, files),
+        current.set_providers(handle, providers),
+        current.set_quicklinks(handle, quicklinks),
+        current.set_fallbacks(handle, fallbacks),
+        current.set_favorites(handle, favorites),
+        current.set_plugin_keywords(handle, plugin_keywords),
+    ]
+    .into_iter()
+    .filter_map(Result::err)
+    .collect()
 }
 
 /// A pinned result's key rendered for a person.
@@ -524,4 +594,41 @@ fn slider<'a>(
     widget::slider(min..=max, value, message)
         .width(Length::Fixed(240.0))
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cosmic::cosmic_config::ConfigSet;
+
+    #[test]
+    fn a_change_here_does_not_undo_one_made_elsewhere() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let store = || {
+            cosmic_config::Config::with_custom_path(
+                jump::APP_ID,
+                Config::VERSION,
+                root.path().into(),
+            )
+            .expect("store")
+        };
+
+        // The window opened with this snapshot...
+        let mut window = Config::get_entry(&store()).expect("readable store");
+        // ...then the launcher pinned a result, and a key was edited by hand.
+        store()
+            .set("favorites", vec!["entry:Firefox".to_owned()])
+            .expect("pin");
+        store().set("cell_size", 200.0_f32).expect("hand edit");
+
+        // Toggling blur in the window writes blur, and only blur.
+        let mut next = window.clone();
+        next.blur = !next.blur;
+        assert!(persist(&mut window, &store(), next).is_empty());
+
+        let stored = Config::get_entry(&store()).expect("readable store");
+        assert_eq!(stored.favorites, ["entry:Firefox"]);
+        assert!((stored.cell_size - 200.0).abs() < f32::EPSILON);
+        assert_eq!(stored.blur, window.blur);
+    }
 }
