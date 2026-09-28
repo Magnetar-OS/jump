@@ -189,8 +189,9 @@ removed or edited while the daemon runs takes effect without a restart.
 ## Install
 
 Requires a Rust toolchain, [`just`](https://github.com/casey/just), and at
-runtime: `pop-launcher` (ships with COSMIC), `plocate` for file search, and
-`xdg-utils` for opening files.
+runtime: `pop-launcher` (ships with COSMIC), `plocate` for file search,
+`xdg-utils` for opening files, and `bsdtar` (libarchive) for
+`jump plugin import` of an `.alfredworkflow` bundle.
 
 ```sh
 just build-release
@@ -423,10 +424,6 @@ the surface-configure path rather than an external stopwatch.
 
 ## Known rough edges
 
-
 - The entrance animation is opacity plus a short rise, with no scale
   component: iced's `Float` only applies a transform when scaling above 1.0,
   so a 0.96 → 1.0 entrance would silently render unscaled.
-- The entrance animation is opacity plus a short rise. There is no scale
-  component: iced's `Float` only applies a transform when scaling above 1.0, so
-  a 0.96 → 1.0 entrance would silently render unscaled.
