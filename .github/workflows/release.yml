@@ -33,6 +33,8 @@ jobs:
     uses: entro314-labs/linux-release-kit/.github/workflows/release.yml@0d733969903db93fa1f3b74e7a02ead82481aa46
     permissions:
       contents: write
+      id-token: write        # build-provenance attestation (Sigstore)
+      attestations: write    # stores the attestation on this repo
     with:
       app_display_name: 'Jump'
       product_name: 'jump'
