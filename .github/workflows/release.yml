@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   release:
-    uses: entro314-labs/linux-release-kit/.github/workflows/release.yml@main
+    uses: entro314-labs/linux-release-kit/.github/workflows/release.yml@0d733969903db93fa1f3b74e7a02ead82481aa46
     permissions:
       contents: write
     with:
@@ -66,7 +66,7 @@ jobs:
   # shared across all entro314-labs apps.
   arch-repo:
     needs: release
-    uses: entro314-labs/linux-release-kit/.github/workflows/arch-repo.yml@main
+    uses: entro314-labs/linux-release-kit/.github/workflows/arch-repo.yml@0d733969903db93fa1f3b74e7a02ead82481aa46
     with:
       tag: ${{ inputs.tag || '' }}
       product_name: 'jump'
@@ -84,7 +84,7 @@ jobs:
   # at the time of wiring — this stays dormant until the key lands).
   aur:
     needs: release
-    uses: entro314-labs/linux-release-kit/.github/workflows/aur.yml@main
+    uses: entro314-labs/linux-release-kit/.github/workflows/aur.yml@0d733969903db93fa1f3b74e7a02ead82481aa46
     with:
       tag: ${{ inputs.tag || '' }}
       pkgname: 'jump-bin'
