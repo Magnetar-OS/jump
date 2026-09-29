@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Rebuilt against the current COSMIC libraries (libcosmic `03d7dcb`).
 - Jump Settings is categorised as desktop settings rather than the bare
   `Settings` category.
 
