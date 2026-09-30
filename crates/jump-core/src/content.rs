@@ -207,22 +207,14 @@ impl Content {
         })
     }
 
-    /// Current on-disk size, including the write-ahead log.
-    ///
-    /// The WAL is counted because it is real space the index is using; ignoring
-    /// it lets the database sit well over its cap between checkpoints.
-    fn size_on_disk(&self) -> u64 {
-        let main = std::fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0);
-        let wal = std::fs::metadata(self.path.with_extension("db-wal"))
-            .map(|m| m.len())
-            .unwrap_or(0);
-        main + wal
-    }
-
     /// Whether the index has reached its configured size ceiling.
+    ///
+    /// The write-ahead log is counted because it is real space the index is
+    /// using; ignoring it lets the database sit well over its cap between
+    /// checkpoints.
     #[must_use]
     pub fn is_full(&self) -> bool {
-        self.size_on_disk() >= self.limits.max_index_bytes
+        disk_usage(&self.path) >= self.limits.max_index_bytes
     }
 
     /// Whether this path is a candidate for content indexing.
@@ -397,6 +389,54 @@ impl Content {
             })
             .collect())
     }
+}
+
+/// The files an index at `path` is made of, in the order they are safe to
+/// delete: the write-ahead log and its shared-memory index before the
+/// database. A database left without its log is a valid, slightly older
+/// database; a log left without its database would be replayed into whatever
+/// database is created at that path next.
+fn files(path: &Path) -> [PathBuf; 3] {
+    let beside = |suffix: &str| {
+        let mut name = path.as_os_str().to_owned();
+        name.push(suffix);
+        PathBuf::from(name)
+    };
+    [beside("-wal"), beside("-shm"), path.to_path_buf()]
+}
+
+/// Bytes the content index at `path` occupies on disk, write-ahead log
+/// included. Zero when there is no index.
+#[must_use]
+pub fn disk_usage(path: &Path) -> u64 {
+    files(path)
+        .iter()
+        .filter_map(|file| std::fs::metadata(file).ok())
+        .map(|metadata| metadata.len())
+        .sum()
+}
+
+/// Delete the content index at `path`, returning the bytes that freed.
+///
+/// Nothing may have the index open. SQLite removes the write-ahead log *by
+/// name* when the last connection closes, so a [`Content`] still open across
+/// this call would later delete the log of whichever index had been created
+/// at `path` in the meantime. Drop every [`Content`] for `path` first.
+///
+/// # Errors
+///
+/// The first file that could not be removed. An index that does not exist is
+/// not an error: there is nothing to free.
+pub fn clear(path: &Path) -> std::io::Result<u64> {
+    let freed = disk_usage(path);
+    for file in files(path) {
+        match std::fs::remove_file(&file) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(freed)
 }
 
 /// Whether `path`'s extension is one we index.
@@ -671,6 +711,47 @@ mod tests {
         assert_eq!(content.index(&[file]), 0);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn clearing_deletes_the_database_and_its_log() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("content.db");
+
+        // No index yet: nothing to free, and not an error.
+        assert_eq!(clear(&path).expect("clear nothing"), 0);
+
+        let file = dir.path().join("diary.md");
+        std::fs::write(&file, "words nobody else should find").expect("write");
+        let mut content = Content::open(&path, Vec::new(), Limits::default()).expect("open index");
+        assert_eq!(content.index(std::slice::from_ref(&file)), 1);
+
+        // While the index is open its write-ahead log is on disk beside it,
+        // and counts towards what the index occupies.
+        let [log, shared, database] = files(&path);
+        assert!(log.exists(), "WAL mode keeps a log beside the database");
+        let database_bytes = std::fs::metadata(&database).expect("database").len();
+        assert!(disk_usage(&path) > database_bytes);
+
+        // Closing checkpoints the log away; put both sidecars back, as a
+        // launcher that was killed mid-index would have left them.
+        drop(content);
+        std::fs::write(&log, b"left behind").expect("log");
+        std::fs::write(&shared, b"left behind").expect("shared memory");
+
+        let occupied = disk_usage(&path);
+        assert_eq!(clear(&path).expect("clear"), occupied);
+        for file in files(&path) {
+            assert!(!file.exists(), "{} survived", file.display());
+        }
+        assert_eq!(disk_usage(&path), 0);
+        // The document itself is not the index's to delete.
+        assert!(file.exists());
+
+        // Switching content search back on starts from nothing.
+        let content = Content::open(&path, Vec::new(), Limits::default()).expect("reopen");
+        assert!(content.is_empty());
+        assert!(content.search("nobody").expect("search").is_empty());
     }
 
     #[test]
