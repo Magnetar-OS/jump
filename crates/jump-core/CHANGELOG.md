@@ -5,9 +5,18 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate
 follows [Semantic Versioning](https://semver.org/). The `jump` application
 keeps its own changelog at the repository root.
 
-## [2.0.0] - Unreleased
+## [2.1.0] - Unreleased
 
 Prepared, not yet published to crates.io.
+
+### Added
+
+- `content::disk_usage`, the bytes a content index occupies on disk with its
+  write-ahead log.
+- `content::clear`, which deletes a content index — database, write-ahead
+  log and shared-memory file — and returns the bytes freed.
+
+## [2.0.0] - 2026-09-29
 
 ### Changed (breaking)
 
