@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-30
+
 ### Added
 
 - **Clear content index.** Switching "Search inside files" off keeps the
@@ -208,7 +210,8 @@ All notable changes to this project are documented here. The format follows
   updates with Alfred's `rerun` (re-query on an interval, clamped 0.5–5 s,
   while the query is on screen).
 
-[Unreleased]: https://github.com/Magnetar-OS/jump/compare/v1.1.2...HEAD
+[Unreleased]: https://github.com/Magnetar-OS/jump/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/Magnetar-OS/jump/compare/v1.1.2...v1.2.0
 [1.1.2]: https://github.com/Magnetar-OS/jump/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/Magnetar-OS/jump/compare/v1.0.2...v1.1.1
 [1.0.2]: https://github.com/Magnetar-OS/jump/compare/v1.0.1...v1.0.2
