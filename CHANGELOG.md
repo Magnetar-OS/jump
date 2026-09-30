@@ -18,6 +18,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Rebuilt against the current COSMIC libraries (libcosmic `6af8b70`).
 - The packages declare the programs Jump runs. `pop-launcher` and
   `xdg-utils` are dependencies: without the first nothing is searched, and
   without the second files and links do not open. `plocate` (file search) and
