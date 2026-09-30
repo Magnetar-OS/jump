@@ -10,12 +10,18 @@
 //! "one overlay". And COSMIC Settings has no mechanism for third-party pages, so
 //! there is nowhere else for this to live.
 //!
-//! The two processes never talk to each other. This window writes
+//! Settings never travel between the two processes. This window writes
 //! `cosmic-config`; the launcher subscribes to the same store and applies
-//! changes live. That is the entire integration, and it is why every control
-//! here takes effect the moment it is touched, with no apply button.
+//! changes live, which is why every control here takes effect the moment it
+//! is touched, with no apply button.
+//!
+//! The one thing this window asks the launcher for directly is clearing the
+//! content index: those are files the launcher may have open, so it is the
+//! one that deletes them. See [`clear_content_index`].
 
+use std::collections::HashMap;
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use cosmic::app::{Core, Settings, Task};
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
@@ -61,7 +67,13 @@ struct App {
     /// Discovered jump plugins, listed so each can be switched off. Kept
     /// current by watching the plugin directories.
     plugins: Vec<(String, String, Option<String>)>,
+    /// What the content index occupies on disk, re-read while the window is
+    /// open: it grows as the launcher indexes and drops to zero when cleared.
+    content_index_bytes: u64,
 }
+
+/// How often the content index's size is re-read. Three `stat` calls.
+const CONTENT_INDEX_POLL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 enum Message {
@@ -79,6 +91,10 @@ enum Message {
     ExternalDrives(bool),
     Content(bool),
     ContentMaxMb(f32),
+    /// Delete the content index.
+    ClearContentIndex,
+    /// Re-read the content index's size.
+    MeasureContentIndex,
     RefreshHours(f32),
     /// Enable or disable the plugin with this id.
     PluginEnabled(String, bool),
@@ -151,6 +167,7 @@ impl cosmic::Application for App {
                 handle,
                 config,
                 plugins,
+                content_index_bytes: content_index_bytes(),
             },
             Task::none(),
         )
@@ -233,6 +250,16 @@ impl cosmic::Application for App {
                 self.plugins = listed(&host);
                 return Task::none();
             }
+            Message::ClearContentIndex => {
+                return Task::future(async {
+                    clear_content_index().await;
+                    cosmic::action::app(Message::MeasureContentIndex)
+                });
+            }
+            Message::MeasureContentIndex => {
+                self.content_index_bytes = content_index_bytes();
+                return Task::none();
+            }
         }
 
         self.save(next);
@@ -250,6 +277,7 @@ impl cosmic::Application for App {
                     Message::ConfigChanged(Box::new(update.config))
                 }),
             Subscription::run(jump::plugins::watch).map(Message::PluginsDiscovered),
+            cosmic::iced::time::every(CONTENT_INDEX_POLL).map(|_| Message::MeasureContentIndex),
         ])
     }
 
@@ -338,6 +366,20 @@ impl cosmic::Application for App {
                     4096.0,
                     Message::ContentMaxMb,
                 ),
+            ))
+            // Switching content search off keeps the index, so switching it
+            // back on is instant; this is how to be rid of it. While content
+            // search is on, the launcher starts a new index straight away.
+            .add(settings::item(
+                fl!(
+                    "files-content-index",
+                    megabytes = megabytes(self.content_index_bytes)
+                ),
+                widget::button::text(fl!("files-content-clear"))
+                    .class(cosmic::theme::Button::Destructive)
+                    .on_press_maybe(
+                        (self.content_index_bytes > 0).then_some(Message::ClearContentIndex),
+                    ),
             ))
             .add(settings::item(
                 fl!("files-refresh-hours"),
@@ -564,6 +606,73 @@ fn persist(
     .collect()
 }
 
+/// What the content index occupies on disk right now.
+fn content_index_bytes() -> u64 {
+    jump::content_index_path().map_or(0, |path| jump_core::content::disk_usage(&path))
+}
+
+/// A byte count as megabytes to one decimal, the unit the index's limit is
+/// set in. Rounded down, so an index that exists never reads as more than
+/// it is.
+fn megabytes(bytes: u64) -> String {
+    const MEGABYTE: u64 = 1024 * 1024;
+    format!("{}.{}", bytes / MEGABYTE, bytes % MEGABYTE * 10 / MEGABYTE)
+}
+
+/// Delete the content index.
+///
+/// A running launcher may have the index open and an indexer writing to it,
+/// so it is asked to do the deleting: it stops the indexer, closes the index
+/// and only then removes the files. With no launcher running nothing has the
+/// index open, and the files are removed here.
+async fn clear_content_index() {
+    let Some(path) = jump::content_index_path() else {
+        return;
+    };
+    match ask_launcher_to_clear().await {
+        Ok(true) => {}
+        Ok(false) => {
+            match tokio::task::spawn_blocking(move || jump_core::content::clear(&path)).await {
+                Ok(Ok(freed)) => tracing::info!(freed, "content index cleared"),
+                Ok(Err(error)) => tracing::error!(%error, "could not clear the content index"),
+                Err(error) => tracing::error!(%error, "clearing the content index did not finish"),
+            }
+        }
+        // Without an answer from the bus there is no telling whether a
+        // launcher has the index open, so the files are left alone.
+        Err(error) => {
+            tracing::error!(%error, "could not reach the launcher; content index not cleared");
+        }
+    }
+}
+
+/// Send the running launcher [`jump::ACTION_CLEAR_CONTENT_INDEX`]. `false`
+/// when no launcher is running.
+async fn ask_launcher_to_clear() -> zbus::Result<bool> {
+    let connection = zbus::Connection::session().await?;
+    let launcher = zbus::names::BusName::try_from(jump::APP_ID)?;
+    if !zbus::fdo::DBusProxy::new(&connection)
+        .await?
+        .name_has_owner(launcher)
+        .await?
+    {
+        return Ok(false);
+    }
+
+    let parameters: Vec<&str> = Vec::new();
+    let platform_data: HashMap<&str, zbus::zvariant::Value<'_>> = HashMap::new();
+    connection
+        .call_method(
+            Some(jump::APP_ID),
+            jump::DBUS_PATH,
+            Some(jump::DBUS_ACTIVATION),
+            "ActivateAction",
+            &(jump::ACTION_CLEAR_CONTENT_INDEX, parameters, platform_data),
+        )
+        .await?;
+    Ok(true)
+}
+
 /// A pinned result's key rendered for a person.
 ///
 /// Keys are internal addresses — `entry:Firefox\u{1f}Web Browser`,
@@ -619,6 +728,13 @@ fn slider<'a>(
 mod tests {
     use super::*;
     use cosmic::cosmic_config::ConfigSet;
+
+    #[test]
+    fn the_index_size_reads_in_megabytes() {
+        assert_eq!(megabytes(0), "0.0");
+        assert_eq!(megabytes(1024 * 1024 * 3 / 2), "1.5");
+        assert_eq!(megabytes(212 * 1024 * 1024 + 999_999), "212.9");
+    }
 
     #[test]
     fn a_change_here_does_not_undo_one_made_elsewhere() {

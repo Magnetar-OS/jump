@@ -27,6 +27,8 @@ pub enum Action {
     Settings,
     /// Rebuild the file index now rather than waiting for the refresh interval.
     RebuildIndex,
+    /// Delete the content index, which switching content search off keeps.
+    ClearContentIndex,
     /// Forget everything in clipboard history.
     ClearClipboard,
     /// Shut the daemon down.
@@ -103,6 +105,13 @@ impl ksni::Tray for Tray {
                 label: jump::fl!("tray-rebuild-index"),
                 icon_name: "view-refresh-symbolic".into(),
                 activate: Box::new(|tray: &mut Self| tray.send(Action::RebuildIndex)),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: jump::fl!("tray-clear-content-index"),
+                icon_name: "edit-delete-symbolic".into(),
+                activate: Box::new(|tray: &mut Self| tray.send(Action::ClearContentIndex)),
                 ..Default::default()
             }
             .into(),

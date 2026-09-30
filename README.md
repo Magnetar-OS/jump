@@ -101,6 +101,13 @@ another worker. There was none, so indexing starved everything else the
 launcher does — activations sent mid-pass simply never opened the overlay. A
 thread the runtime does not own cannot occupy it.
 
+Switching **Search inside files** off stops indexing and querying but keeps
+the index at `~/.local/share/jump/content.db`, so switching it back on is
+instant. To be rid of what was read, use **Clear** beside the index's size in
+Jump Settings, or **Clear content index** in the status-area menu. The
+launcher stops the indexer and closes the index before it deletes the files;
+if content search is still on, it then starts a new index from nothing.
+
 Package-manager caches are excluded from both indexes. On this machine they
 contributed the majority of 41,412 content candidates and a 111 MB index made
 entirely of other people's source code — excluding them cut the path index build

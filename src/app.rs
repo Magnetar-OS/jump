@@ -23,7 +23,7 @@ use jump_core::{Content, Files, Frecency, Item, Launcher, PluginHost, Source};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OwnedRwLockReadGuard, RwLock};
 
 use crate::apps::{self, App as AppEntry};
 use crate::clipboard::{self, Clipboard, Entry};
@@ -112,9 +112,12 @@ pub enum Message {
     /// The content index is open and ready to query. `stopped` is its
     /// indexer's stop flag, which identifies the indexer it belongs to.
     ContentReady {
-        content: Arc<Mutex<Content>>,
+        content: Arc<OpenContent>,
         stopped: Arc<AtomicBool>,
     },
+    /// The content index's files are gone, or could not be removed; either
+    /// way nothing is waiting on them any more.
+    ContentIndexCleared,
     /// Full-text results for `query`, which may already be stale.
     ContentResults { query: String, items: Vec<Item> },
     /// The compositor's window list changed.
@@ -222,11 +225,10 @@ pub struct App {
     /// `None` when file search is disabled in configuration.
     files: Option<Files>,
     /// Full-text index over file contents; `None` unless enabled.
-    ///
-    /// Shared behind a mutex because indexing mutates it from a background task
-    /// while queries read it — SQLite handles the concurrency, but the handle
-    /// itself is not `Sync`.
-    content: Option<Arc<Mutex<Content>>>,
+    content: Option<Arc<OpenContent>>,
+    /// Held shared by every open content index and exclusively while its
+    /// files are deleted; see [`IndexFiles`].
+    index_files: IndexFiles,
     /// Stops the running content indexer when dropped.
     content_indexer: Option<IndexerStop>,
     /// Bumped whenever the file-search settings change, so an index built for
@@ -683,10 +685,12 @@ impl App {
             let text = query_for_content;
             let task = Task::perform(
                 async move {
-                    let items = content.lock().await.search(&text).unwrap_or_else(|error| {
+                    let index = content.index.lock().await;
+                    let items = index.search(&text).unwrap_or_else(|error| {
                         tracing::warn!(%error, "content search failed");
                         Vec::new()
                     });
+                    drop(index);
                     (text, items)
                 },
                 |(query, items)| cosmic::action::app(Message::ContentResults { query, items }),
@@ -751,7 +755,7 @@ impl App {
         if !self.config.files.content {
             return Task::none();
         }
-        let Some(path) = dirs::data_dir().map(|dir| dir.join("jump").join("content.db")) else {
+        let Some(path) = jump::content_index_path() else {
             return Task::none();
         };
         let extensions = self.config.files.content_extensions.clone();
@@ -759,8 +763,16 @@ impl App {
         let stop = IndexerStop::default();
         let stopped = Arc::clone(&stop.0);
         self.content_indexer = Some(stop);
+        let index_files = Arc::clone(&self.index_files);
 
         Task::future(async move {
+            // Waits here while the index is being cleared, and is not worth
+            // opening at all if it was replaced or switched off meanwhile.
+            let in_use = index_files.read_owned().await;
+            if stopped.load(Ordering::Relaxed) {
+                return cosmic::action::app(Message::None);
+            }
+
             let configured = if extensions.is_empty() {
                 jump_core::content::DEFAULT_EXTENSIONS
                     .iter()
@@ -771,7 +783,10 @@ impl App {
             };
 
             let content = match Content::open(&path, configured.clone(), limits) {
-                Ok(content) => Arc::new(Mutex::new(content)),
+                Ok(index) => Arc::new(OpenContent {
+                    index: Mutex::new(index),
+                    _in_use: in_use,
+                }),
                 Err(error) => {
                     tracing::warn!(%error, "content index unavailable");
                     return cosmic::action::app(Message::None);
@@ -818,13 +833,35 @@ impl App {
 
                     let candidates = runtime.block_on(files.content_candidates(&configured));
                     tracing::info!(candidates = candidates.len(), "indexing file contents");
-                    index_contents(&background, &candidates, &thread_stop);
+                    index_contents(&background.index, &candidates, &thread_stop);
                 });
             if let Err(error) = spawned {
                 tracing::warn!(%error, "could not start the content indexing thread");
             }
 
             cosmic::action::app(Message::ContentReady { content, stopped })
+        })
+    }
+
+    /// Delete the content index — the explicit way to be rid of what
+    /// "Search inside files" read, which switching it off deliberately keeps.
+    ///
+    /// The index is let go first: queries stop, and the indexer stops at its
+    /// next chunk. The files are deleted once nothing has them open, and
+    /// [`Message::ContentIndexCleared`] starts a fresh index if content
+    /// search is still switched on.
+    fn clear_content_index(&mut self) -> Task<Message> {
+        let Some(path) = jump::content_index_path() else {
+            return Task::none();
+        };
+        tracing::info!("clearing the content index on request");
+        self.content = None;
+        self.content_indexer = None;
+        self.forget_answers(false);
+        let index_files = Arc::clone(&self.index_files);
+        Task::future(async move {
+            clear_index(index_files, path).await;
+            cosmic::action::app(Message::ContentIndexCleared)
         })
     }
 
@@ -1341,6 +1378,7 @@ impl cosmic::Application for App {
             toplevels: None,
             files: None,
             content: None,
+            index_files: IndexFiles::default(),
             content_indexer: None,
             index_generation: 0,
             clips: Vec::new(),
@@ -1553,6 +1591,12 @@ impl cosmic::Application for App {
                 Task::none()
             }
 
+            Message::ContentIndexCleared => match self.files.clone() {
+                // Still switched on: start over from an empty index.
+                Some(files) => self.start_content_index(files),
+                None => Task::none(),
+            },
+
             Message::ContentResults { query, items } => {
                 // Content search switched off since this was asked: its
                 // answer must not reach the list.
@@ -1642,6 +1686,7 @@ impl cosmic::Application for App {
                     tracing::info!("rebuilding file index on request");
                     self.build_file_index(true)
                 }
+                tray::Action::ClearContentIndex => self.clear_content_index(),
                 tray::Action::ClearClipboard => {
                     self.clips.clear();
                     clipboard::clear_history();
@@ -2140,6 +2185,13 @@ impl cosmic::Application for App {
             {
                 self.open_with_query(args.join(" "))
             }
+            // The settings window asking for the content index to be deleted:
+            // it cannot do that itself while this process has the index open.
+            cosmic::dbus_activation::Details::ActivateAction { action, .. }
+                if action == jump::ACTION_CLEAR_CONTENT_INDEX =>
+            {
+                self.clear_content_index()
+            }
             // Re-running `jump` while the daemon is up is the toggle gesture,
             // so this is what a keybinding ends up calling.
             _ => self.update(Message::Toggle),
@@ -2231,6 +2283,41 @@ fn emoji_items(needle: &str) -> Vec<Item> {
             score: 1.0,
         })
         .collect()
+}
+
+/// Who may touch the content index's files.
+///
+/// Every [`OpenContent`] holds the shared side for as long as its connection
+/// exists, and clearing the index takes the exclusive side. So the files are
+/// only ever deleted once the indexer thread has stopped and every query has
+/// finished, and nothing reopens the index while they go. SQLite needs
+/// exactly that: a connection that outlived the deletion would remove the
+/// *next* index's write-ahead log, by name, when it finally closed.
+type IndexFiles = Arc<RwLock<()>>;
+
+/// The content index, open.
+#[derive(Debug)]
+pub struct OpenContent {
+    /// Behind a mutex because indexing mutates it from a background thread
+    /// while queries read it — SQLite handles the concurrency, but the handle
+    /// itself is not `Sync`.
+    index: Mutex<Content>,
+    /// The claim on the index's files. Declared after `index`, so the
+    /// connection is closed before the claim is released.
+    _in_use: OwnedRwLockReadGuard<()>,
+}
+
+/// Delete the content index at `path` once nothing has it open.
+async fn clear_index(index_files: IndexFiles, path: PathBuf) {
+    let _exclusive = index_files.write().await;
+    // Unlinking a database of several hundred megabytes is not instant, and
+    // the application's runtime has one worker.
+    let cleared = tokio::task::spawn_blocking(move || jump_core::content::clear(&path)).await;
+    match cleared {
+        Ok(Ok(freed)) => tracing::info!(freed, "content index cleared"),
+        Ok(Err(error)) => tracing::error!(%error, "could not clear the content index"),
+        Err(error) => tracing::error!(%error, "clearing the content index did not finish"),
+    }
 }
 
 /// Stops a content indexer thread when dropped.
@@ -2580,6 +2667,53 @@ mod tests {
 
         let running = IndexerStop::default();
         assert_eq!(index_contents(&open(), &candidates, &running.0), 3);
+    }
+
+    #[test]
+    fn clearing_waits_until_the_index_is_closed() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let path = root.path().join("content.db");
+        let document = root.path().join("note.txt");
+        std::fs::write(&document, "private words").expect("document");
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let index_files = IndexFiles::default();
+            // What the launcher, a running indexer and a query in flight
+            // each hold.
+            let open = Arc::new(OpenContent {
+                index: Mutex::new(
+                    Content::open(
+                        &path,
+                        vec!["txt".to_owned()],
+                        jump_core::content::Limits::default(),
+                    )
+                    .expect("content index"),
+                ),
+                _in_use: Arc::clone(&index_files).read_owned().await,
+            });
+            let indexer = Arc::clone(&open);
+            assert_eq!(indexer.index.lock().await.index(&[document]), 1);
+
+            let clearing = tokio::spawn(clear_index(Arc::clone(&index_files), path.clone()));
+
+            // The launcher lets go at once; the indexer is mid-chunk. The
+            // files stay until it, too, has closed the index.
+            drop(open);
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            assert!(!clearing.is_finished());
+            assert!(jump_core::content::disk_usage(&path) > 0);
+
+            drop(indexer);
+            clearing.await.expect("clear task");
+            assert_eq!(jump_core::content::disk_usage(&path), 0);
+
+            // Nothing is left waiting: the index can be opened again.
+            drop(index_files.try_read().expect("free to reopen"));
+        });
     }
 
     #[test]

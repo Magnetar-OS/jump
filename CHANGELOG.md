@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Clear content index.** Switching "Search inside files" off keeps the
+  index on disk so switching it back on is instant, which left no way to be
+  rid of what it had read short of deleting the file by hand. Jump Settings
+  now shows what the index occupies on disk with a Clear button beside it,
+  and the status-area menu has a "Clear content index" item. The launcher
+  stops the indexer and closes the index before deleting it; while content
+  search is on, it starts a new index afterwards.
+
 ## [1.1.2] - 2026-09-29
 
 ### Changed

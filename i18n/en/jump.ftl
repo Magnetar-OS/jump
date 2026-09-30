@@ -17,6 +17,7 @@ tray-search = Search…
 tray-applications = Applications
 tray-settings = Settings…
 tray-rebuild-index = Rebuild file index
+tray-clear-content-index = Clear content index
 tray-clear-clipboard = Clear clipboard history
 tray-quit = Quit
 
@@ -44,6 +45,9 @@ files-by-name = Search files by name
 files-external-drives = Include external drives
 files-content = Search inside files
 files-content-limit = Content index limit (MB)
+# { $megabytes } is the index's size on disk, already formatted ("212.4").
+files-content-index = Content index on disk: { $megabytes } MB
+files-content-clear = Clear
 files-refresh-hours = Rebuild index every (hours)
 
 note-live = Changes apply immediately; the launcher does not need restarting.

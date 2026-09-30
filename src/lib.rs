@@ -24,3 +24,16 @@ pub const DBUS_PATH: &str = "/com/magnetaros/Jump";
 
 /// Interface implemented by libcosmic's single-instance support.
 pub const DBUS_ACTIVATION: &str = "org.freedesktop.DbusActivation";
+
+/// The activation action that asks the running launcher to delete its content
+/// index: sent by the settings window, which must not delete the files of an
+/// index the launcher may have open.
+pub const ACTION_CLEAR_CONTENT_INDEX: &str = "clear-content-index";
+
+/// Where the content index lives, for the launcher that owns it and the
+/// settings window that reports its size. `None` without an XDG data
+/// directory.
+#[must_use]
+pub fn content_index_path() -> Option<std::path::PathBuf> {
+    dirs::data_dir().map(|dir| dir.join("jump").join("content.db"))
+}
