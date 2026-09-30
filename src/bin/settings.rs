@@ -673,13 +673,6 @@ async fn ask_launcher_to_clear() -> zbus::Result<bool> {
     Ok(true)
 }
 
-/// A pinned result's key rendered for a person.
-///
-/// Keys are internal addresses — `entry:Firefox\u{1f}Web Browser`,
-/// `system:dark-mode` — so the source prefix becomes a plain word and the
-/// unit-separator between an entry's name and description becomes a dash.
-/// The alternative is showing the user a control-character-laden string and
-/// expecting them to recognise what they pinned.
 /// The plugins as this window lists them: id, name and manifest keyword.
 /// The host's discovery, minus the parts only the launcher needs — this
 /// window lists plugins, it does not run them.
@@ -695,6 +688,13 @@ fn listed(host: &PluginHost) -> Vec<(String, String, Option<String>)> {
         .collect()
 }
 
+/// A pinned result's key rendered for a person.
+///
+/// Keys are internal addresses — `entry:Firefox\u{1f}Web Browser`,
+/// `system:dark-mode` — so the source prefix becomes a plain word and the
+/// unit-separator between an entry's name and description becomes a dash.
+/// The alternative is showing the user a control-character-laden string and
+/// expecting them to recognise what they pinned.
 fn favorite_label(key: &str) -> String {
     let (kind, rest) = key.split_once(':').unwrap_or(("", key));
     let rest = rest.replace('\u{1f}', " — ");
