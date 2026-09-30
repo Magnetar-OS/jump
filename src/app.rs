@@ -250,6 +250,9 @@ pub struct App {
     /// The action panel, open on the selected result. Closed by Escape, by
     /// typing, and by anything that changes what is selected.
     actions: Option<actions::Panel>,
+    /// Why the last activation did nothing, shown in the panel's one-line
+    /// footer until the user types or moves the selection.
+    notice: Option<String>,
 
     /// `None` until the bridge finishes starting.
     launcher: Option<Launcher>,
@@ -286,6 +289,67 @@ pub struct App {
 }
 
 impl App {
+    /// The launcher before anything has started: no surface, no backends, no
+    /// index. `init` hands it what the session has; tests hand it nothing.
+    fn new(
+        mut core: Core,
+        config: Config,
+        apps: Vec<AppEntry>,
+        frecency: Frecency,
+        mut plugins: PluginHost,
+    ) -> Self {
+        // The overlay is shell chrome, not a window: `AppType::System` makes
+        // libcosmic's frosted and corner-radius decisions follow the
+        // system-interface settings, the same as the panel and the built-in
+        // launcher.
+        core.set_app_type(cosmic::core::AppType::System);
+        // Our own subscription handles Escape and the navigation keys, and the
+        // query field is the only focusable widget — leaving libcosmic's
+        // keyboard navigation on would interpret Tab, Escape and Ctrl+F a
+        // second time in parallel.
+        core.set_keyboard_nav(false);
+
+        plugins.set_disabled(config.disabled_plugins.iter().cloned());
+        plugins.set_keyword_overrides(config.plugin_keywords.iter().cloned());
+        let mut panel = Panel::new();
+        panel.set_reduced_motion(config.reduce_motion);
+
+        Self {
+            core,
+            surface: None,
+            screen: Size::new(1920.0, 1080.0),
+            input: String::new(),
+            arrived: Arrived::default(),
+            in_flight: Vec::new(),
+            results: Vec::new(),
+            result_icons: Vec::new(),
+            apps,
+            windows: Vec::new(),
+            toplevels: None,
+            files: None,
+            content: None,
+            index_files: IndexFiles::default(),
+            content_indexer: None,
+            index_generation: 0,
+            clips: Vec::new(),
+            now_playing: None,
+            devices: Vec::new(),
+            clipboard: None,
+            selected: 0,
+            actions: None,
+            notice: None,
+            launcher: None,
+            frecency,
+            plugins,
+            config,
+            panel,
+            dismissing: false,
+            scroll_travel: 0.0,
+            blur_settled: false,
+            awaiting_first_configure: false,
+        }
+    }
+
     /// What the overlay is showing.
     ///
     /// Derived from the query rather than stored: an empty query *is* Launchpad
@@ -296,6 +360,35 @@ impl App {
             Mode::Grid
         } else {
             Mode::Search
+        }
+    }
+
+    /// Whether the panel carries its one-line footer: a notice, or the
+    /// first-run hint shown until the launcher has been used once. The line
+    /// takes height, so the panel geometry has to know.
+    fn has_footer(&self) -> bool {
+        self.notice.is_some() || self.frecency.is_empty()
+    }
+
+    /// Say in the overlay why an activation did nothing, and stay open.
+    ///
+    /// Dismissing instead looked exactly like a successful activation, with
+    /// the reason only in the log.
+    fn refuse(&mut self, reason: Unavailable) -> Task<Message> {
+        tracing::warn!(
+            ?reason,
+            "nothing could act on this; saying so in the overlay"
+        );
+        self.notice = Some(reason.message());
+        self.refresh_blur()
+    }
+
+    /// Drop the notice once the user has moved on from what it was about.
+    fn retire_notice(&mut self) -> Task<Message> {
+        if self.notice.take().is_some() {
+            self.refresh_blur()
+        } else {
+            Task::none()
         }
     }
 
@@ -730,7 +823,7 @@ impl App {
             rows,
             metrics,
             self.config.grid_layout,
-            self.frecency.is_empty(),
+            self.has_footer(),
         );
 
         // Two switches, both of which have to be on. `frosted_system_interface`
@@ -944,6 +1037,7 @@ impl App {
         self.results.clear();
         self.result_icons.clear();
         self.selected = 0;
+        self.notice = None;
         // Deliberately not started here — see `awaiting_first_configure`.
         self.awaiting_first_configure = true;
 
@@ -1024,6 +1118,7 @@ impl App {
         self.results.clear();
         self.result_icons.clear();
         self.selected = 0;
+        self.notice = None;
 
         surface::close(id).map(|()| cosmic::action::app(Message::None))
     }
@@ -1047,10 +1142,8 @@ impl App {
 
         let key = app.key();
         let Some(launch) = app.launch() else {
-            // Nothing to start, but the click still deserves an answer, and
-            // leaving the overlay up over a tile that does nothing is worse
-            // than closing it.
-            return self.dismiss();
+            // Nothing to start, and the click still deserves an answer.
+            return self.refuse(Unavailable::Application);
         };
 
         self.frecency.record(&key);
@@ -1089,17 +1182,22 @@ impl App {
         // Counted as a use only once something acted on it: a plugin switched
         // off mid-query, a launcher bridge that is down, or no clipboard
         // backend leaves nothing done, and ranking must not learn from that.
-        let Some(task) = self.dispatch(&source, id) else {
-            tracing::warn!(%key, "nothing could act on this result; not counted as a use");
-            return self.dismiss();
-        };
-        self.frecency.record(&key);
-        task
+        match self.dispatch(&source, id) {
+            Ok(task) => {
+                self.frecency.record(&key);
+                task
+            }
+            Err(reason) => self.refuse(reason),
+        }
     }
 
-    /// Act on a search result's `source` and begin dismissing. `None` when
+    /// Act on a search result's `source` and begin dismissing. An error when
     /// nothing could act on it, before anything was dismissed.
-    fn dispatch(&mut self, source: &Source, id: jump_core::Indice) -> Option<Task<Message>> {
+    fn dispatch(
+        &mut self,
+        source: &Source,
+        id: jump_core::Indice,
+    ) -> Result<Task<Message>, Unavailable> {
         // Activating a launcher result leaves a request in flight, and the
         // answer is what tells us to start the application. Everything else
         // acts here and now.
@@ -1107,17 +1205,26 @@ impl App {
 
         match source {
             Source::Launcher => {
-                self.launcher.as_ref()?.activate(id);
+                self.launcher
+                    .as_ref()
+                    .ok_or(Unavailable::Launcher)?
+                    .activate(id);
                 release = Release::Nothing;
             }
             Source::Window { identifier } => {
-                self.toplevels.as_ref()?.activate(identifier);
+                self.toplevels
+                    .as_ref()
+                    .ok_or(Unavailable::Windows)?
+                    .activate(identifier);
             }
             Source::File { path } => {
                 jump_core::files::open(path);
             }
             Source::Clipboard { text } => {
-                self.clipboard.as_ref()?.copy(text);
+                self.clipboard
+                    .as_ref()
+                    .ok_or(Unavailable::Clipboard)?
+                    .copy(text);
             }
             Source::Plugin {
                 plugin,
@@ -1125,7 +1232,10 @@ impl App {
                 variables,
                 ..
             } => {
-                self.plugins.get(plugin)?.activate(arg, variables);
+                self.plugins
+                    .get(plugin)
+                    .ok_or(Unavailable::Plugin)?
+                    .activate(arg, variables);
             }
             Source::Process { pid } => {
                 jump_core::process::terminate(*pid, false);
@@ -1134,18 +1244,24 @@ impl App {
                 jump_core::web::open(url);
             }
             Source::Emoji { emoji } => {
-                self.clipboard.as_ref()?.copy(emoji);
+                self.clipboard
+                    .as_ref()
+                    .ok_or(Unavailable::Clipboard)?
+                    .copy(emoji);
             }
             Source::Calc { answer } => {
                 // The answer is already on screen; what is left to do with it
                 // is take it somewhere else.
-                self.clipboard.as_ref()?.copy(answer);
+                self.clipboard
+                    .as_ref()
+                    .ok_or(Unavailable::Clipboard)?
+                    .copy(answer);
             }
-            Source::System { id } => match system::run(id)? {
+            Source::System { id } => match system::run(id).ok_or(Unavailable::Command)? {
                 system::Outcome::Launch(launch) => {
                     // A program launch goes through the same activation-token
                     // path as everything else.
-                    return Some(Task::batch([
+                    return Ok(Task::batch([
                         self.spawn(launch),
                         self.dismiss_with(release),
                     ]));
@@ -1153,7 +1269,7 @@ impl App {
                 system::Outcome::Background(task) => {
                     // A bus round trip must not run on the frame; dismiss now
                     // and let the call finish behind the fade-out.
-                    return Some(Task::batch([
+                    return Ok(Task::batch([
                         Task::future(async move {
                             system::run_background(task).await;
                             cosmic::action::app(Message::None)
@@ -1169,7 +1285,7 @@ impl App {
         // Waiting would leave the panel visibly hanging over the window that is
         // about to appear; the activation token is what makes that window take
         // focus, not our still being on screen.
-        Some(self.dismiss_with(release))
+        Ok(self.dismiss_with(release))
     }
 
     /// One line saying why `item` sits where it does — the frecency
@@ -1227,10 +1343,10 @@ impl App {
                 self.dismiss()
             }
             actions::Kind::CopyText(text) => {
-                match self.clipboard.as_ref() {
-                    Some(clipboard) => clipboard.copy(&text),
-                    None => tracing::warn!("no clipboard backend; copy dropped"),
-                }
+                let Some(clipboard) = self.clipboard.as_ref() else {
+                    return self.refuse(Unavailable::Clipboard);
+                };
+                clipboard.copy(&text);
                 self.dismiss()
             }
             actions::Kind::Trash(path) => {
@@ -1257,9 +1373,10 @@ impl App {
                 arg,
                 variables,
             } => {
-                if let Some(plugin) = self.plugins.get(&plugin) {
-                    plugin.activate(&arg, &variables);
-                }
+                let Some(plugin) = self.plugins.get(&plugin) else {
+                    return self.refuse(Unavailable::Plugin);
+                };
+                plugin.activate(&arg, &variables);
                 self.dismiss()
             }
             actions::Kind::Window(command) => {
@@ -1305,9 +1422,10 @@ impl App {
                 Task::none()
             }
             actions::Kind::LauncherContext { item, option } => {
-                if let Some(launcher) = self.launcher.as_ref() {
-                    launcher.activate_context(item, option);
-                }
+                let Some(launcher) = self.launcher.as_ref() else {
+                    return self.refuse(Unavailable::Launcher);
+                };
+                launcher.activate_context(item, option);
                 // The reply may be a DesktopEntry to launch, so the service
                 // must not be told the interaction is over.
                 self.dismiss_with(Release::Nothing)
@@ -1335,6 +1453,37 @@ enum Release {
     Nothing,
 }
 
+/// Why an activation could not do anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unavailable {
+    /// The pop-launcher bridge is down.
+    Launcher,
+    /// The compositor offers no window management.
+    Windows,
+    /// The compositor offers no clipboard access.
+    Clipboard,
+    /// The plugin was switched off or removed since it answered.
+    Plugin,
+    /// The system command is not one this build knows.
+    Command,
+    /// The desktop entry has no command to run.
+    Application,
+}
+
+impl Unavailable {
+    /// The line shown to the user.
+    fn message(self) -> String {
+        match self {
+            Self::Launcher => fl!("unavailable-launcher"),
+            Self::Windows => fl!("unavailable-windows"),
+            Self::Clipboard => fl!("unavailable-clipboard"),
+            Self::Plugin => fl!("unavailable-plugin"),
+            Self::Command => fl!("unavailable-command"),
+            Self::Application => fl!("unavailable-application"),
+        }
+    }
+}
+
 impl cosmic::Application for App {
     type Executor = cosmic::executor::Default;
     type Flags = Flags;
@@ -1350,62 +1499,14 @@ impl cosmic::Application for App {
         &mut self.core
     }
 
-    fn init(mut core: Core, flags: Self::Flags) -> (Self, Task<Self::Message>) {
-        let config = Config::load();
-
-        // The overlay is shell chrome, not a window: `AppType::System` makes
-        // libcosmic's frosted and corner-radius decisions follow the
-        // system-interface settings, the same as the panel and the built-in
-        // launcher.
-        core.set_app_type(cosmic::core::AppType::System);
-        // Our own subscription handles Escape and the navigation keys, and the
-        // query field is the only focusable widget — leaving libcosmic's
-        // keyboard navigation on would interpret Tab, Escape and Ctrl+F a
-        // second time in parallel.
-        core.set_keyboard_nav(false);
-
-        let mut app = Self {
+    fn init(core: Core, flags: Self::Flags) -> (Self, Task<Self::Message>) {
+        let mut app = Self::new(
             core,
-            surface: None,
-            screen: Size::new(1920.0, 1080.0),
-            input: String::new(),
-            arrived: Arrived::default(),
-            in_flight: Vec::new(),
-            results: Vec::new(),
-            result_icons: Vec::new(),
-            apps: apps::load(),
-            windows: Vec::new(),
-            toplevels: None,
-            files: None,
-            content: None,
-            index_files: IndexFiles::default(),
-            content_indexer: None,
-            index_generation: 0,
-            clips: Vec::new(),
-            now_playing: None,
-            devices: Vec::new(),
-            clipboard: None,
-            selected: 0,
-            actions: None,
-            launcher: None,
-            frecency: Frecency::load(),
-            plugins: {
-                let mut plugins = PluginHost::discover();
-                plugins.set_disabled(config.disabled_plugins.iter().cloned());
-                plugins.set_keyword_overrides(config.plugin_keywords.iter().cloned());
-                plugins
-            },
-            panel: {
-                let mut panel = Panel::new();
-                panel.set_reduced_motion(config.reduce_motion);
-                panel
-            },
-            config,
-            dismissing: false,
-            scroll_travel: 0.0,
-            blur_settled: false,
-            awaiting_first_configure: false,
-        };
+            Config::load(),
+            apps::load(),
+            Frecency::load(),
+            PluginHost::discover(),
+        );
 
         // Normally the process is started *by* the keybinding, so the user is
         // already waiting and the overlay should map immediately. Under
@@ -1770,11 +1871,14 @@ impl cosmic::Application for App {
                     self.panel.results_changed(Instant::now());
                 }
 
+                // A notice was about the query it appeared under.
+                let notice_retired = self.notice.take().is_some();
+
                 let search = self.search(input);
-                if mode_changed {
-                    // Grid and search panels differ in both dimensions, so the
-                    // frosted region has to be resent or it keeps the shape of
-                    // the mode we just left.
+                if mode_changed || notice_retired {
+                    // Grid and search panels differ in both dimensions, and
+                    // the notice's line took height, so the frosted region
+                    // has to be resent or it keeps the shape it had.
                     Task::batch([search, self.refresh_blur()])
                 } else {
                     search
@@ -1813,7 +1917,7 @@ impl cosmic::Application for App {
                     self.panel
                         .page_changed(Instant::now(), page > previous_page);
                 }
-                Task::none()
+                self.retire_notice()
             }
 
             Message::MovePage(direction) => {
@@ -1832,17 +1936,19 @@ impl cosmic::Application for App {
                     self.panel
                         .page_changed(Instant::now(), page > previous_page);
                 }
-                Task::none()
+                self.retire_notice()
             }
 
             Message::Select(index) => {
-                if index != self.selected {
-                    self.actions = None;
+                // Hovering the row the notice is about keeps it.
+                if index == self.selected {
+                    return Task::none();
                 }
+                self.actions = None;
                 if index < self.selectable() {
                     self.selected = index;
                 }
-                Task::none()
+                self.retire_notice()
             }
 
             Message::Activate => {
@@ -2053,6 +2159,7 @@ impl cosmic::Application for App {
             &self.config,
             self.page(),
             self.actions.as_ref(),
+            self.notice.as_deref(),
             // Nothing has ever been activated, so the launcher has never
             // actually been used.
             self.frecency.is_empty(),
@@ -2571,6 +2678,7 @@ fn launcher_stream() -> impl cosmic::iced::futures::Stream<Item = Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cosmic::Application as _;
 
     fn item(key: &str, source: Source, score: f32) -> Item {
         Item {
@@ -2667,6 +2775,78 @@ mod tests {
 
         let running = IndexerStop::default();
         assert_eq!(index_contents(&open(), &candidates, &running.0), 3);
+    }
+
+    /// A launcher with nothing behind it: no bridge, no clipboard, no
+    /// plugins, no usage history, and none of the user's own state read.
+    fn bare_app() -> App {
+        App::new(
+            Core::default(),
+            Config::default(),
+            Vec::new(),
+            Frecency::default(),
+            PluginHost::default(),
+        )
+    }
+
+    #[test]
+    fn an_activation_nothing_can_act_on_says_so_and_stays_open() {
+        let mut app = bare_app();
+        app.surface = Some(window::Id::unique());
+        app.input = "clip".to_owned();
+        app.install(vec![
+            item(
+                "clip:1",
+                Source::Clipboard {
+                    text: "copied".to_owned(),
+                },
+                1.0,
+            ),
+            file("notes.txt", 1.0),
+        ]);
+
+        // No clipboard backend: Enter cannot copy anything.
+        let _ = app.update(Message::ActivateAt(0));
+
+        assert_eq!(app.notice, Some(Unavailable::Clipboard.message()));
+        assert!(!app.dismissing, "closing would look like it worked");
+        assert!(app.surface.is_some());
+        assert!(app.frecency.is_empty(), "a no-op is not a use");
+        assert!(app.has_footer(), "the panel must make room for the line");
+
+        // Hovering the same row keeps the line; moving on retires it.
+        let _ = app.update(Message::Select(0));
+        assert!(app.notice.is_some());
+        let _ = app.update(Message::MoveSelection(1));
+        assert_eq!(app.notice, None);
+
+        // So does typing.
+        let _ = app.update(Message::ActivateAt(0));
+        assert!(app.notice.is_some());
+        let _ = app.update(Message::InputChanged("clipb".to_owned()));
+        assert_eq!(app.notice, None);
+    }
+
+    #[test]
+    fn a_plugin_removed_since_it_answered_is_reported() {
+        let mut app = bare_app();
+        app.surface = Some(window::Id::unique());
+        app.input = "gh jump".to_owned();
+        app.install(vec![item(
+            "plugin:github:jump",
+            Source::Plugin {
+                plugin: "github".to_owned(),
+                arg: "jump".to_owned(),
+                variables: Vec::new(),
+                mods: Vec::new(),
+            },
+            1.0,
+        )]);
+
+        let _ = app.update(Message::Activate);
+
+        assert_eq!(app.notice, Some(Unavailable::Plugin.message()));
+        assert!(!app.dismissing);
     }
 
     #[test]

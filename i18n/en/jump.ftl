@@ -166,6 +166,15 @@ calc-copy-subtitle = Copy the answer
 ## Shown until the launcher has been used once.
 first-run-hint = Type to search · Ctrl+K for actions · try “clip”, “emoji”, “kill”, or “= 2+2”
 
+## Shown under the results when Enter could not do anything, instead of
+## closing the launcher as if it had.
+unavailable-launcher = Nothing happened: the application search service is not running.
+unavailable-windows = Nothing happened: this compositor does not let Jump manage windows.
+unavailable-clipboard = Nothing happened: this compositor does not give Jump the clipboard.
+unavailable-plugin = Nothing happened: that plugin has been switched off or removed.
+unavailable-command = Nothing happened: that command is no longer available.
+unavailable-application = Nothing happened: this application has no command to run.
+
 ## The frecency inspector, shown under the action panel.
 ranking-never-used = Score { $score } · never used, so no usage boost
 ranking-used = Score { $score } · used { $count ->

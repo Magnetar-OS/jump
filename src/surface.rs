@@ -215,7 +215,8 @@ pub fn close(id: window::Id) -> Task<()> {
     destroy_layer_surface(id)
 }
 
-/// Height the first-run hint adds to the panel.
+/// Height the panel's one-line footer adds: the first-run hint, or the
+/// notice that an activation did nothing.
 ///
 /// The panel is drawn into a fixed rectangle, so anything the view puts in
 /// the column has to be accounted for here too — a hint that the geometry
@@ -227,7 +228,7 @@ pub const HINT_HEIGHT: f32 = 26.0;
 ///
 /// `rows` is the number of result rows currently visible, which lets the panel
 /// grow downward as results arrive instead of reserving space for a list that
-/// may be empty. `hint` adds room for the first-run line.
+/// may be empty. `hint` adds room for the footer line.
 #[must_use]
 pub fn panel_rect(
     screen: cosmic::iced::Size,

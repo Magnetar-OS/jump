@@ -18,6 +18,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Enter on a result that nothing can act on — a plugin switched off or
+  removed since it answered, a copy with no clipboard access, an application
+  with no command, the application search service being down — no longer
+  closes the launcher as if it had worked. It stays open and says why in a
+  line under the results, until you type or move the selection.
 - `jump plugin import` of a workflow with several script filters is all or
   nothing even when moving a plugin into place fails part-way: the ones
   already moved are taken back out, where they used to be left behind beside

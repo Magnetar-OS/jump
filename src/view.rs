@@ -141,6 +141,7 @@ pub fn overlay<'a>(
     config: &Config,
     page: usize,
     actions: Option<&'a actions::Panel>,
+    notice: Option<&'a str>,
     first_run: bool,
 ) -> Element<'a, Message> {
     let layout = config.grid_layout;
@@ -149,7 +150,14 @@ pub fn overlay<'a>(
         Mode::Search => results.len(),
         Mode::Grid => metrics.rows_for(apps.len()),
     };
-    let rect = surface::panel_rect(screen, mode, rows, metrics, layout, first_run);
+    let rect = surface::panel_rect(
+        screen,
+        mode,
+        rows,
+        metrics,
+        layout,
+        notice.is_some() || first_run,
+    );
     let fullscreen = mode == Mode::Grid && layout == GridLayout::Fullscreen;
 
     let content = panel_body(
@@ -167,6 +175,7 @@ pub fn overlay<'a>(
         fullscreen,
         config,
         page,
+        notice,
         first_run,
     );
 
@@ -227,8 +236,18 @@ fn panel_body<'a>(
     fullscreen: bool,
     config: &Config,
     page: usize,
+    notice: Option<&'a str>,
     first_run: bool,
 ) -> Element<'a, Message> {
+    // The panel's one-line footer: why the last activation did nothing, or,
+    // until the launcher has been used once, what else it can do. A notice
+    // is about what the user just did, so it wins and is set in full-strength
+    // text rather than the hint's dimmed one.
+    let footer = match notice {
+        Some(notice) => Some((notice.to_owned(), true)),
+        None => first_run.then(|| (fl!("first-run-hint"), false)),
+    };
+
     // Full screen centres a fixed-width field rather than stretching it to the
     // display: a 3440 px wide text field looks absurd and puts the caret miles
     // from the results.
@@ -281,7 +300,11 @@ fn panel_body<'a>(
                 fullscreen,
                 config,
                 page,
-                if first_run { surface::HINT_HEIGHT } else { 0.0 },
+                if footer.is_some() {
+                    surface::HINT_HEIGHT
+                } else {
+                    0.0
+                },
             ));
         }
         _ => {}
@@ -292,10 +315,10 @@ fn panel_body<'a>(
     // has activated anything — the hint is keyed on there being no usage
     // history at all, so it retires itself rather than needing a dismiss
     // button and a setting to remember the dismissal.
-    if first_run {
+    if let Some((line, primary)) = footer {
         children.push(
-            text::caption(fl!("first-run-hint"))
-                .class(cosmic::theme::Text::Color(alpha_text(alpha, false)))
+            text::caption(line)
+                .class(cosmic::theme::Text::Color(alpha_text(alpha, primary)))
                 .apply(container)
                 .width(Length::Fill)
                 .align_x(Alignment::Center)
