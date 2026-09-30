@@ -1206,10 +1206,12 @@ mod tests {
         };
         assert_eq!(host.query("t x").await.items.len(), 1);
 
+        // Empty is the proof: the script answers after half a second, so an
+        // answer here could only mean the 180 ms deadline was not applied.
+        // (A wall-clock bound on top of that measured how busy the machine
+        // was, and failed when it was.)
         host.set_keyword_overrides([("slow", "")]);
-        let started = std::time::Instant::now();
         assert!(host.query("x").await.items.is_empty());
-        assert!(started.elapsed() < Duration::from_millis(450));
     }
 
     #[test]
@@ -1427,11 +1429,15 @@ mod tests {
         // "Killed" has to mean everything the plugin started for this query,
         // not just the script: a shell's background job would otherwise keep
         // running, detached, after its results were dropped.
+        //
+        // A second, not the 100 ms this once used: on a machine busy enough
+        // for the shell to take longer than that to start, the deadline
+        // killed the script before it had a child to record.
         let root = tempfile::tempdir().expect("tempdir");
         let plugin = scripted(
             root.path(),
             "#!/bin/sh\nsleep 30 &\necho $! > child.pid\nwait\n",
-            Some(100),
+            Some(1000),
         );
 
         let (items, _) = plugin.query("x", plugin.manifest.timeout(Some("t"))).await;
