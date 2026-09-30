@@ -198,7 +198,10 @@ removed or edited while the daemon runs takes effect without a restart.
 Requires a Rust toolchain, [`just`](https://github.com/casey/just), and at
 runtime: `pop-launcher` (ships with COSMIC), `plocate` for file search,
 `xdg-utils` for opening files, and `bsdtar` (libarchive) for
-`jump plugin import` of an `.alfredworkflow` bundle.
+`jump plugin import` of an `.alfredworkflow` bundle. The packages declare
+them: `pop-launcher` and `xdg-utils` as dependencies, `plocate` and `bsdtar`
+as recommendations on Debian and Fedora and as dependencies on Arch, whose
+package format here has no optional dependencies.
 
 ```sh
 just build-release

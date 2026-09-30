@@ -16,6 +16,14 @@ All notable changes to this project are documented here. The format follows
   stops the indexer and closes the index before deleting it; while content
   search is on, it starts a new index afterwards.
 
+### Changed
+
+- The packages declare the programs Jump runs. `pop-launcher` and
+  `xdg-utils` are dependencies: without the first nothing is searched, and
+  without the second files and links do not open. `plocate` (file search) and
+  `bsdtar` (`jump plugin import` of an archive) are recommended on Debian and
+  Fedora, and dependencies on Arch.
+
 ### Fixed
 
 - Enter on a result that nothing can act on — a plugin switched off or

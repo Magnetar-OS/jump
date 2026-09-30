@@ -23,23 +23,55 @@ license: GPL-3.0-only
 description: |
   Search applications, windows, files, and clipboard
 
-# Runtime dependencies, per distro. PROVISIONAL — derived from the -sys
-# crates in Cargo.lock; after the first CI build, trim against
+# Runtime dependencies, per distro. The libraries are PROVISIONAL — derived
+# from the -sys crates in Cargo.lock; after the first CI build, trim against
 # `ldd target/release/jump`. The arch names are validated for real by
 # arch-repo.yml's container install test.
+#
+# The programs Jump runs are declared by what happens without them:
+#
+#   pop-launcher  required. It is the search engine; without it no query is
+#                 answered at all. Debian and Ubuntu do not carry it — it
+#                 comes from Pop!_OS's repository — so the .deb installs
+#                 where COSMIC itself came from a repository that has it.
+#   xdg-utils     required. `xdg-open` is how a file, a link, a quicklink and
+#                 a web search are opened; without it those rows do nothing.
+#   plocate       file search, on by default. Without it file search answers
+#                 nothing and everything else works: recommended.
+#   bsdtar        only `jump plugin import` of an .alfredworkflow archive,
+#                 which says so when it is missing: recommended.
+#
+# nfpm's Arch packager writes `depend` only — it has no optdepends — so on
+# Arch the two recommended programs are hard dependencies. That costs
+# nothing for bsdtar (libarchive, which pacman itself depends on) and one
+# small package with no enabled service for plocate.
 overrides:
   deb:
     depends:
       - libxkbcommon0
       - libsqlite3-0
+      - pop-launcher
+      - xdg-utils
+    recommends:
+      - plocate
+      - libarchive-tools
   rpm:
     depends:
       - libxkbcommon
       - sqlite-libs
+      - pop-launcher
+      - xdg-utils
+    recommends:
+      - plocate
+      - bsdtar
   archlinux:
     depends:
       - libxkbcommon
       - sqlite
+      - pop-launcher
+      - xdg-utils
+      - plocate
+      - libarchive
 
 contents:
   # Everything `just rootdir=.release-kit/pkgroot install` staged: binaries,

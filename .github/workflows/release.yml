@@ -96,7 +96,9 @@ jobs:
       # The binaries in this package are GPL-3.0-only; MPL-2.0 covers only
       # the jump-core engine crate, which is published to crates.io, not here.
       license: 'GPL-3.0-only'
-      depends: 'libxkbcommon sqlite'
+      # Matches nfpm.yaml's archlinux list, which explains each one. The
+      # kit's AUR job has no optdepends input either.
+      depends: 'libxkbcommon sqlite pop-launcher xdg-utils plocate libarchive'
       provides: 'jump'
       conflicts: 'jump'
       maintainer: 'Dominikos Pritis <dominikos.pritis@gmail.com>'
