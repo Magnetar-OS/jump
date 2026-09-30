@@ -16,6 +16,13 @@ All notable changes to this project are documented here. The format follows
   stops the indexer and closes the index before deleting it; while content
   search is on, it starts a new index afterwards.
 
+### Fixed
+
+- `jump plugin import` of a workflow with several script filters is all or
+  nothing even when moving a plugin into place fails part-way: the ones
+  already moved are taken back out, where they used to be left behind beside
+  the error.
+
 ## [1.1.2] - 2026-09-29
 
 ### Changed

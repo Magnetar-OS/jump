@@ -267,7 +267,8 @@ pub fn import(workflow: &Path, destination_root: &Path) -> Result<Import, Error>
     // Each plugin is built in a private staging directory beside its
     // destination and moved into place only once every filter has been
     // converted, so a filter that fails half-way — or an import that fails
-    // as a whole — leaves nothing behind in the plugin root.
+    // as a whole, even while moving — leaves nothing behind in the plugin
+    // root.
     std::fs::create_dir_all(destination_root)?;
     let mut staged = Vec::new();
     for (uid, filter, keyword, directory) in planned {
@@ -300,13 +301,52 @@ pub fn import(workflow: &Path, destination_root: &Path) -> Result<Import, Error>
     if staged.is_empty() {
         return Err(Error::NoScriptFilters);
     }
-    for (staging, imported) in staged {
-        std::fs::rename(staging.path(), &imported.directory)?;
-        // Moved, so there is nothing left for the guard to remove.
-        let _ = staging.keep();
-        import.plugins.push(imported);
-    }
+    import.plugins = place(staged)?;
     Ok(import)
+}
+
+/// Move every staged plugin into place, or none of them.
+///
+/// There is no renaming several directories at once, so a move that fails
+/// after earlier ones succeeded is undone: each plugin already in place goes
+/// back to its staging directory, whose guard then removes it. The staging
+/// directories sit beside their destinations, on the same filesystem, so
+/// both directions are plain renames.
+fn place(staged: Vec<(tempfile::TempDir, Imported)>) -> Result<Vec<Imported>, Error> {
+    let mut placed: Vec<(tempfile::TempDir, Imported)> = Vec::new();
+    for (staging, imported) in staged {
+        if let Err(error) = std::fs::rename(staging.path(), &imported.directory) {
+            for (staging, imported) in &placed {
+                take_back(staging.path(), &imported.directory)?;
+            }
+            return Err(error.into());
+        }
+        placed.push((staging, imported));
+    }
+    Ok(placed
+        .into_iter()
+        .map(|(staging, imported)| {
+            // Moved for good, so there is nothing left for the guard to
+            // remove.
+            let _ = staging.keep();
+            imported
+        })
+        .collect())
+}
+
+/// Undo one placed plugin: back to `staging`, or deleted where it stands if
+/// even that fails. An error only when it could be neither moved nor
+/// deleted, which names the directory the import had to leave behind.
+fn take_back(staging: &Path, directory: &Path) -> Result<(), Error> {
+    if std::fs::rename(directory, staging).is_ok() {
+        return Ok(());
+    }
+    std::fs::remove_dir_all(directory).map_err(|error| {
+        Error::Io(std::io::Error::other(format!(
+            "the import failed and {} could not be removed again: {error}",
+            directory.display()
+        )))
+    })
 }
 
 /// A script filter and the plugin directory it will become.
@@ -946,6 +986,40 @@ mod tests {
         ));
         // filter-1 sorts first; it must not have been written either.
         assert_eq!(entries(&plugins), ["other"]);
+    }
+
+    #[test]
+    fn a_move_that_fails_undoes_the_ones_before_it() {
+        let (_root, _workflow, plugins) = workspace();
+        let stage = |name: &str| {
+            let staging = tempfile::Builder::new()
+                .prefix(".jump-import-")
+                .tempdir_in(&plugins)
+                .expect("staging");
+            std::fs::write(staging.path().join("manifest.toml"), "name = \"x\"\n")
+                .expect("manifest");
+            let imported = Imported {
+                directory: plugins.join(name),
+                name: name.to_owned(),
+                keyword: None,
+            };
+            (staging, imported)
+        };
+        let staged = vec![stage("first"), stage("second")];
+        // Something took the second name after the import had planned around
+        // it, and a directory with contents cannot be renamed over.
+        std::fs::create_dir_all(plugins.join("second")).expect("squatter");
+        std::fs::write(plugins.join("second").join("theirs"), "kept").expect("squatter file");
+
+        assert!(matches!(place(staged), Err(Error::Io(_))));
+
+        // The first plugin had already moved into place; it is gone again,
+        // no staging directory is left, and what was there is untouched.
+        assert_eq!(entries(&plugins), ["second"]);
+        assert_eq!(
+            std::fs::read_to_string(plugins.join("second").join("theirs")).expect("squatter"),
+            "kept"
+        );
     }
 
     #[test]
