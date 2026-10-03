@@ -2858,7 +2858,7 @@ dependencies = [
 
 [[package]]
 name = "jump"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "dirs 7.0.0",
  "i18n-embed",
