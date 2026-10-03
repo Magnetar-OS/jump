@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   release:
-    uses: entro314-labs/linux-release-kit/.github/workflows/release.yml@0d733969903db93fa1f3b74e7a02ead82481aa46
+    uses: entro314-labs/linux-release-kit/.github/workflows/release.yml@4e6249e3e42de8694ba12e8b93417345887d6e1d
     permissions:
       contents: write
       id-token: write        # build-provenance attestation (Sigstore)
@@ -68,7 +68,7 @@ jobs:
   # shared across all entro314-labs apps.
   arch-repo:
     needs: release
-    uses: entro314-labs/linux-release-kit/.github/workflows/arch-repo.yml@0d733969903db93fa1f3b74e7a02ead82481aa46
+    uses: entro314-labs/linux-release-kit/.github/workflows/arch-repo.yml@4e6249e3e42de8694ba12e8b93417345887d6e1d
     with:
       tag: ${{ inputs.tag || '' }}
       product_name: 'jump'
@@ -86,7 +86,7 @@ jobs:
   # at the time of wiring — this stays dormant until the key lands).
   aur:
     needs: release
-    uses: entro314-labs/linux-release-kit/.github/workflows/aur.yml@0d733969903db93fa1f3b74e7a02ead82481aa46
+    uses: entro314-labs/linux-release-kit/.github/workflows/aur.yml@4e6249e3e42de8694ba12e8b93417345887d6e1d
     with:
       tag: ${{ inputs.tag || '' }}
       pkgname: 'jump-bin'
