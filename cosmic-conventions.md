@@ -84,7 +84,7 @@ features = [
 
 > **⚠ They move together.** `rust-version` in Cargo.toml and the channel in `rust-toolchain.toml` have to agree. When they drift, cargo refuses to build at all.
 
-Peek declares 1.93 to match but has neither a `rust-toolchain.toml` nor a `rustfmt.toml`; the second would reformat every import across the tree, which is a separate decision.
+Peek's `rust-version` and `rust-toolchain.toml` agree, on the toolchain the Magnetar suite is released with rather than on 1.93. It has no `rustfmt.toml`, which would reformat every import across the tree and is a separate decision.
 
 ### Licensing
 
@@ -862,7 +862,7 @@ Where each project stands, and — where it diverges — why. A rejection with a
 | Convention | grabit | Locket | Peek |
 |---|---|---|---|
 | libcosmic unpinned, Cargo.lock committed | follows | follows | follows |
-| rust-version 1.93 / rust-toolchain.toml / rustfmt.toml | follows | follows | partial — version only; rustfmt would reformat the tree |
+| rust-version 1.93 / rust-toolchain.toml / rustfmt.toml | follows | follows | partial — version and toolchain file; rustfmt.toml would reformat the tree |
 | GPL-3.0-only | — | — | partial — `-or-later`, forced by poppler |
 | justfile with rootdir / prefix / cargo-target-dir | follows; `check` is `-D warnings` | follows; install wires nothing up | follows |
 | Nested `data/justfile`, vendoring recipes | skipped — nothing packages it yet | follows | follows |
