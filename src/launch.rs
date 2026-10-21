@@ -23,6 +23,7 @@
 
 use std::path::PathBuf;
 
+use cosmic::desktop::gpu::{Descriptor, Preference};
 use jump_core::GpuPreference;
 
 /// A desktop entry resolved to the point where it can be started.
@@ -103,14 +104,37 @@ async fn gpu_env(preference: GpuPreference) -> Vec<(String, String)> {
         return Vec::new();
     };
 
-    let gpu = match preference {
-        GpuPreference::Default => gpus.into_iter().find(|gpu| gpu.default),
-        GpuPreference::NonDefault => gpus.into_iter().find(|gpu| !gpu.default),
-        GpuPreference::SpecificIdx(index) => gpus.into_iter().nth(index as usize),
-    };
+    let gpus: Vec<Descriptor> = gpus
+        .into_iter()
+        .map(|gpu| Descriptor {
+            name: gpu.name,
+            environment: gpu.environment,
+            default: gpu.default,
+            discrete: gpu.discrete,
+        })
+        .collect();
 
-    gpu.map(|gpu| gpu.environment.into_iter().collect())
+    select(preference, &gpus)
+        .and_then(|index| gpus.into_iter().nth(index))
+        .map(|gpu| gpu.environment.into_iter().collect())
         .unwrap_or_default()
+}
+
+/// Which GPU's environment to launch with, or `None` to leave the default.
+///
+/// `PrefersNonDefaultGPU` follows libcosmic's policy: the discrete GPU, and no
+/// override at all when the default GPU already is the discrete one. Taking
+/// "the first GPU that is not the default" sent those entries to the
+/// integrated GPU on a machine whose default is the discrete card.
+fn select(preference: GpuPreference, gpus: &[Descriptor]) -> Option<usize> {
+    match preference {
+        GpuPreference::Default => Preference::Default.select(gpus),
+        GpuPreference::NonDefault => Preference::NonDefault.select(gpus),
+        GpuPreference::SpecificIdx(index) => {
+            let index = index as usize;
+            (index < gpus.len()).then_some(index)
+        }
+    }
 }
 
 /// Ask `switcheroo-control` what GPUs are available.
@@ -143,6 +167,37 @@ async fn gpus() -> Option<Vec<switcheroo_control::Gpu>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn gpu(default: bool, discrete: bool) -> Descriptor {
+        Descriptor {
+            name: String::new(),
+            environment: Default::default(),
+            default,
+            discrete,
+        }
+    }
+
+    #[test]
+    fn non_default_gpu_is_the_discrete_one() {
+        let integrated_default = [gpu(true, false), gpu(false, true)];
+        assert_eq!(
+            select(GpuPreference::NonDefault, &integrated_default),
+            Some(1)
+        );
+
+        // The default already is the discrete card: the integrated one, which
+        // is what "not the default" used to pick, is the wrong answer.
+        let discrete_default = [gpu(false, false), gpu(true, true)];
+        assert_eq!(select(GpuPreference::NonDefault, &discrete_default), None);
+    }
+
+    #[test]
+    fn default_and_out_of_range_indices_override_nothing() {
+        let gpus = [gpu(true, false), gpu(false, true)];
+        assert_eq!(select(GpuPreference::Default, &gpus), None);
+        assert_eq!(select(GpuPreference::SpecificIdx(1), &gpus), Some(1));
+        assert_eq!(select(GpuPreference::SpecificIdx(2), &gpus), None);
+    }
 
     /// Write a desktop file and hand back its path.
     ///

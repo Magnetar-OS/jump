@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Rebuilt against the current COSMIC libraries (libcosmic `430f3d4`) with
+  Rust 1.99.1.
+
+### Fixed
+
+- An application whose desktop entry asks for the discrete GPU
+  (`PrefersNonDefaultGPU`) is no longer started on the integrated GPU when
+  the machine's default GPU already is the discrete one. The choice now
+  follows libcosmic's GPU policy: the discrete card, and no override when the
+  default already is one.
+
 ## [1.2.2] - 2026-10-13
 
 ### Changed
