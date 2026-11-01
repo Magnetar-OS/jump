@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- The clipboard history file is created readable only by its owner. It used
+  to be written under the umask and narrowed to 0600 afterwards, so passwords
+  in it were readable by other users for the length of the write. It is now
+  also synced to disk before it replaces the old file.
+
+### Fixed
+
+- The panel applet names itself in a tooltip on hover.
+- The settings window's spacing follows the interface density instead of
+  fixed pixel values.
+
 ## [1.3.0] - 2026-11-01
 
 ### Changed

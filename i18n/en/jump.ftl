@@ -1,4 +1,6 @@
 app-title = Jump
+# The panel applet's tooltip.
+applet-tooltip = Search apps, files and more
 app-description = Search applications, windows, files, and clipboard
 
 # The query field's placeholder.

@@ -285,6 +285,7 @@ impl cosmic::Application for App {
     // the window's layout. The same allowance every COSMIC app makes.
     #[allow(clippy::too_many_lines)]
     fn view(&self) -> Element<'_, Self::Message> {
+        let spacing = cosmic::theme::spacing();
         let appearance = settings::section()
             .title(fl!("section-appearance"))
             .add(settings::item(
@@ -530,8 +531,8 @@ impl cosmic::Application for App {
             favorites.into(),
             note.into(),
         ])
-        .spacing(20)
-        .padding(24)
+        .spacing(spacing.space_m)
+        .padding(spacing.space_l)
         .apply(widget::scrollable)
         .height(Length::Fill)
         .into()

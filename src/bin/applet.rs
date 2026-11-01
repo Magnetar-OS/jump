@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use cosmic::app::{Core, Task};
 use cosmic::iced::window::Id;
 use cosmic::{Element, widget};
+use jump::fl;
 
 const ID: &str = "com.magnetaros.JumpApplet";
 
@@ -31,6 +32,7 @@ fn main() -> cosmic::iced::Result {
         .with_writer(std::io::stderr)
         .init();
 
+    jump::localize::localize();
     cosmic::applet::run::<Applet>(())
 }
 
@@ -44,6 +46,8 @@ enum Message {
     Open,
     /// Nothing to do; activation is fire-and-forget.
     Done,
+    /// The tooltip's surface, which the panel draws as a subsurface.
+    Surface(cosmic::surface::Action<Message>),
 }
 
 impl cosmic::Application for Applet {
@@ -70,6 +74,7 @@ impl cosmic::Application for Applet {
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
         match message {
             Message::Done => Task::none(),
+            Message::Surface(action) => cosmic::task::message(cosmic::Action::Surface(action)),
             Message::Open => Task::future(async {
                 activate().await;
                 cosmic::action::app(Message::Done)
@@ -81,11 +86,20 @@ impl cosmic::Application for Applet {
         // The panel recolours symbolic icons for the current theme, so the
         // launcher's own coloured icon would look out of place next to every
         // other applet.
-        self.core
+        let button = self
+            .core
             .applet
             .icon_button_from_handle(widget::icon::from_name("system-search-symbolic").into())
-            .on_press(Message::Open)
-            .into()
+            .on_press(Message::Open);
+        // Named on hover, like every other applet in the panel: a magnifier
+        // alone does not say which search it opens.
+        Element::from(self.core.applet.applet_tooltip::<Message>(
+            button,
+            fl!("applet-tooltip"),
+            false,
+            Message::Surface,
+            None,
+        ))
     }
 
     fn view_window(&self, _id: Id) -> Element<'_, Self::Message> {
