@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Built on the latest releases of its dependencies: tokio 1.54, serde_json
+  1.0.154, plist 1.10.3, notify 8.2.1, rust-embed 8.13, and emojis 0.9.1 in
+  jump-core.
+
 ## [1.3.1] - 2026-11-01
 
 ### Security
