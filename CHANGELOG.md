@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-01
+
 ### Security
 
 - The clipboard history file is created readable only by its owner. It used
@@ -264,7 +266,8 @@ All notable changes to this project are documented here. The format follows
   updates with Alfred's `rerun` (re-query on an interval, clamped 0.5–5 s,
   while the query is on screen).
 
-[Unreleased]: https://github.com/Magnetar-OS/jump/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/Magnetar-OS/jump/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/Magnetar-OS/jump/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/Magnetar-OS/jump/compare/v1.2.3...v1.3.0
 [1.2.3]: https://github.com/Magnetar-OS/jump/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/Magnetar-OS/jump/compare/v1.2.1...v1.2.2
