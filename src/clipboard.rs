@@ -573,22 +573,54 @@ fn save_history(entries: &[Entry]) {
     };
 
     // Clipboard history routinely contains passwords and tokens, so the file is
-    // written readable only by its owner. Write-then-rename keeps a crash from
+    // created readable only by its owner — not written under the umask and
+    // narrowed afterwards, which left it world-readable for the length of the
+    // write. Write, sync, then rename keeps a crash or a power cut from
     // truncating it.
     let temporary = path.with_extension("json.tmp");
-    if std::fs::write(&temporary, contents).is_err() {
-        return;
+    let _ = write_private(&temporary, contents.as_bytes())
+        .and_then(|()| std::fs::rename(&temporary, &path));
+}
+
+/// Writes `contents` to a new file at `path` with mode 0600 from creation,
+/// synced to disk. A leftover file from an interrupted write is removed
+/// first, since opening an existing file keeps its old permissions.
+fn write_private(path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    match std::fs::remove_file(path) {
+        Err(why) if why.kind() != std::io::ErrorKind::NotFound => return Err(why),
+        _ => {}
     }
-    let _ = std::fs::set_permissions(
-        &temporary,
-        <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o600),
-    );
-    let _ = std::fs::rename(&temporary, &path);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(contents)?;
+    file.sync_all()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_is_private_from_creation_even_over_a_leftover_file() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.json.tmp");
+        std::fs::write(&path, "stale").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        write_private(&path, b"secret").unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "secret");
+    }
 
     #[test]
     fn preview_collapses_whitespace() {
