@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- jump-core 2.1.2 is on crates.io with the raised requirements: emojis 0.9.1,
+  serde_json 1.0.154 and tokio 1.54. 2.1.1 had been published with the old
+  ones.
+
 ## [1.3.2] - 2026-11-01
 
 ### Changed
