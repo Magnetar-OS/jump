@@ -16,14 +16,16 @@
 //!   `PrefersNonDefaultGPU`. Which variables those are depends on the vendor,
 //!   so they come from `switcheroo-control` rather than being hardcoded.
 //!
-//! `spawn_desktop_exec` does the rest: it resolves the user's configured
-//! terminal for `Terminal=true` entries, expands `Exec` field codes, and places
-//! the child in its own systemd scope so it neither dies with the daemon nor
-//! inherits its cgroup.
+//! `cosmic_launch::spawn` does the rest: it resolves the user's configured
+//! terminal for `Terminal=true` entries, expands `Exec` field codes, and starts
+//! the child as its own `app-<id>@<random>.service` unit of the user's systemd
+//! session, so it neither dies with the daemon nor inherits its cgroup — and
+//! the session's scheduler sees it as the application it is.
 
 use std::path::PathBuf;
 
-use cosmic::desktop::gpu::{Descriptor, Preference};
+use cosmic_launch::CustomExecutable;
+use cosmic_launch::gpu::{Descriptor, Preference};
 use jump_core::GpuPreference;
 
 /// A desktop entry resolved to the point where it can be started.
@@ -33,6 +35,8 @@ pub struct Launch {
     /// it maps back to the entry that asked for it.
     pub app_id: String,
     pub exec: String,
+    /// The entry's `Path=`, the directory the application is started in.
+    pub working_directory: Option<String>,
     pub terminal: bool,
     pub gpu: GpuPreference,
 }
@@ -65,6 +69,7 @@ impl Launch {
         Some(Self {
             app_id: entry.id,
             exec,
+            working_directory: entry.working_directory,
             terminal: entry.terminal,
             gpu,
         })
@@ -86,63 +91,73 @@ impl Launch {
             env.push(("DESKTOP_STARTUP_ID".into(), token));
         }
 
-        env.extend(gpu_env(self.gpu).await);
+        let gpus = gpus().await.unwrap_or_default();
+        let preference = preference(self.gpu, &gpus);
 
-        cosmic::desktop::spawn_desktop_exec(self.exec, env, Some(&self.app_id), self.terminal)
-            .await;
+        let session = match zbus::Connection::session().await {
+            Ok(session) => session,
+            Err(why) => {
+                tracing::error!(%why, app = %self.app_id, "no session bus to launch on");
+                return;
+            }
+        };
+
+        let mut executable =
+            CustomExecutable::new(self.app_id.clone(), self.exec).terminal(self.terminal);
+        if let Some(directory) = self.working_directory {
+            executable = executable.working_dir(directory);
+        }
+
+        if let Err(why) = cosmic_launch::spawn(
+            &session,
+            &executable,
+            None,
+            &gpus,
+            Some(preference),
+            env,
+            &[] as &[String],
+        )
+        .await
+        {
+            tracing::error!(%why, app = %self.app_id, "failed to launch");
+        }
     }
 }
 
-/// Environment that steers a process onto the requested GPU.
-///
-/// Empty on a single-GPU machine, and empty when `switcheroo-control` is not
-/// running — in both cases the default GPU is the only sensible answer, and
-/// forcing PRIME variables at a machine without a discrete card would be worse
-/// than doing nothing.
-async fn gpu_env(preference: GpuPreference) -> Vec<(String, String)> {
-    let Some(gpus) = gpus().await else {
-        return Vec::new();
-    };
-
-    let gpus: Vec<Descriptor> = gpus
-        .into_iter()
-        .map(|gpu| Descriptor {
-            name: gpu.name,
-            environment: gpu.environment,
-            default: gpu.default,
-            discrete: gpu.discrete,
-        })
-        .collect();
-
-    select(preference, &gpus)
-        .and_then(|index| gpus.into_iter().nth(index))
-        .map(|gpu| gpu.environment.into_iter().collect())
-        .unwrap_or_default()
-}
-
-/// Which GPU's environment to launch with, or `None` to leave the default.
+/// The GPU preference to launch with, in libcosmic's terms.
 ///
 /// `PrefersNonDefaultGPU` follows libcosmic's policy: the discrete GPU, and no
-/// override at all when the default GPU already is the discrete one. Taking
-/// "the first GPU that is not the default" sent those entries to the
-/// integrated GPU on a machine whose default is the discrete card.
-fn select(preference: GpuPreference, gpus: &[Descriptor]) -> Option<usize> {
+/// override at all when the default GPU already is the discrete one. A
+/// specific index pop-launcher names is honoured only while it is in range —
+/// `cosmic_launch::spawn` indexes the GPU list with it unchecked — and is the
+/// default GPU otherwise.
+fn preference(preference: GpuPreference, gpus: &[Descriptor]) -> Preference {
     match preference {
-        GpuPreference::Default => Preference::Default.select(gpus),
-        GpuPreference::NonDefault => Preference::NonDefault.select(gpus),
+        GpuPreference::Default => Preference::Default,
+        GpuPreference::NonDefault => Preference::NonDefault,
         GpuPreference::SpecificIdx(index) => {
             let index = index as usize;
-            (index < gpus.len()).then_some(index)
+            if index < gpus.len() {
+                Preference::Id(index)
+            } else {
+                Preference::Default
+            }
         }
     }
 }
 
 /// Ask `switcheroo-control` what GPUs are available.
 ///
+/// `None` on a single-GPU machine and when `switcheroo-control` is not running:
+/// in both cases the default GPU is the only sensible answer, and forcing PRIME
+/// variables at a machine without a discrete card would be worse than doing
+/// nothing. Not `cosmic_launch::gpu::enumerate`, which builds its proxy with
+/// property caching on.
+///
 /// Queried per launch rather than cached at startup: a machine can gain or lose
 /// an external GPU while the daemon is running, and the call costs one system
 /// bus round trip on a path that is already spawning a process.
-async fn gpus() -> Option<Vec<switcheroo_control::Gpu>> {
+async fn gpus() -> Option<Vec<Descriptor>> {
     let connection = zbus::Connection::system().await.ok()?;
 
     // Property caching is turned off deliberately. It is populated eagerly when
@@ -160,13 +175,30 @@ async fn gpus() -> Option<Vec<switcheroo_control::Gpu>> {
         return None;
     }
 
-    let gpus = proxy.get_gpus().await.ok()?;
+    let gpus: Vec<Descriptor> = proxy
+        .get_gpus()
+        .await
+        .ok()?
+        .into_iter()
+        .map(|gpu| Descriptor {
+            name: gpu.name,
+            environment: gpu.environment,
+            default: gpu.default,
+            discrete: gpu.discrete,
+        })
+        .collect();
     (!gpus.is_empty()).then_some(gpus)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The GPU `cosmic_launch::spawn` takes the environment of: it calls
+    /// `select` on the preference it is given.
+    fn select(preference: GpuPreference, gpus: &[Descriptor]) -> Option<usize> {
+        super::preference(preference, gpus).select(gpus)
+    }
 
     fn gpu(default: bool, discrete: bool) -> Descriptor {
         Descriptor {

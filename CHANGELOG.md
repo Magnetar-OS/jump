@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Rebuilt against the current COSMIC libraries (libcosmic `95236a9`).
+- An application started from Jump runs as its own `app-<id>@….service`
+  unit of the user's systemd session, through libcosmic's new launcher, rather
+  than in a scope created after the fact. The session's scheduler reads that
+  unit to give the application its proper CPU and I/O priority.
+- A desktop entry's `Path=` is honoured: the application starts in that
+  directory.
+- `jump-core` 2.1.1 (prepared, not yet published) reads its history with
+  rusqlite 0.41, up from 0.40. No API change.
+
 ## [1.2.3] - 2026-10-21
 
 ### Changed

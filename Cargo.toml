@@ -64,6 +64,11 @@ tempfile = "3.27.0"
 # The variables differ per vendor, so they have to be asked for rather than
 # hardcoded; this is the same source cosmic-app-library and cosmic-launcher use.
 switcheroo-control = { git = "https://github.com/pop-os/dbus-settings-bindings" }
+# Launching: libcosmic's own launcher crate, from the same repository and so
+# the same locked revision. Its default `systemd` feature starts each
+# application as an `app-<id>@<random>.service` unit of the user's session,
+# so a child neither inherits the daemon's cgroup nor dies with it.
+cosmic-launch = { git = "https://github.com/pop-os/libcosmic.git" }
 
 # Plugin directories are watched so a newly installed plugin works without a
 # restart. Already in the tree through cosmic-config, which watches its store
@@ -104,10 +109,6 @@ features = [
     "dbus-config",
     # Desktop-entry enumeration and launching, used by Launchpad mode.
     "desktop",
-    # Launch applications inside their own systemd scope. Without this a child
-    # inherits the launcher's cgroup, so an app the user started outlives or
-    # dies with the daemon depending on how it was spawned.
-    "desktop-systemd-scope",
     # Correct shaping for scripts that need it (Arabic, Indic, and friends).
     # Application names come from arbitrary desktop files, so the grid has to
     # render whatever is installed.

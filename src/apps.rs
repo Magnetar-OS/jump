@@ -31,6 +31,8 @@ pub struct App {
     /// in the view would mean hundreds of theme lookups per redraw.
     pub icon: icon::Handle,
     exec: Option<String>,
+    /// The entry's `Path=`, the directory the application is started in.
+    working_directory: Option<String>,
     terminal: bool,
     /// Whether the entry asks for the discrete GPU.
     prefers_dgpu: bool,
@@ -69,6 +71,7 @@ impl App {
         Some(Launch {
             app_id: self.id.clone(),
             exec,
+            working_directory: self.working_directory.clone(),
             terminal: self.terminal,
             gpu: if self.prefers_dgpu {
                 GpuPreference::NonDefault
@@ -104,6 +107,7 @@ impl App {
             id: entry.id,
             name: entry.name,
             exec: entry.exec,
+            working_directory: entry.working_directory,
             terminal: entry.terminal,
             prefers_dgpu: entry.prefers_dgpu,
             actions: entry

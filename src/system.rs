@@ -355,6 +355,7 @@ pub fn run(id: &str) -> Option<Outcome> {
         Action::SettingsPage(page) => Outcome::Launch(Launch {
             app_id: "com.system76.CosmicSettings".to_owned(),
             exec: format!("cosmic-settings {page}"),
+            working_directory: None,
             terminal: false,
             gpu: jump_core::GpuPreference::Default,
         }),
