@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Built on zbus 6, as libcosmic now is, on switcheroo-control-zbus (the
+  renamed GPU-switching bindings) and on toml 1.2.
+
 ### Fixed
 
 - A plugin whose script was written a moment ago — just scaffolded, or saved

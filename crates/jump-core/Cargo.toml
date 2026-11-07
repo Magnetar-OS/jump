@@ -33,7 +33,7 @@ thiserror = "2"
 dirs = "7.0"
 
 # Plugin manifests are TOML; plugin *responses* are JSON (Alfred-compatible).
-toml = "1.1"
+toml = "1.2"
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 emojis = "0.9.1"
 

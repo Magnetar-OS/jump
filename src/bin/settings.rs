@@ -661,7 +661,7 @@ async fn ask_launcher_to_clear() -> zbus::Result<bool> {
     }
 
     let parameters: Vec<&str> = Vec::new();
-    let platform_data: HashMap<&str, zbus::zvariant::Value<'_>> = HashMap::new();
+    let platform_data: HashMap<&str, zbus::Variant<'_>> = HashMap::new();
     connection
         .call_method(
             Some(jump::APP_ID),

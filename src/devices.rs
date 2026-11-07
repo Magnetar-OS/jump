@@ -213,8 +213,8 @@ async fn bluetooth_devices() -> Vec<Device> {
 async fn fetch_bluetooth() -> zbus::Result<Vec<Device>> {
     let connection = zbus::Connection::system().await?;
     let manager = zbus::fdo::ObjectManagerProxy::builder(&connection)
-        .destination("org.bluez")?
-        .path("/")?
+        .destination("org.bluez")
+        .path("/")
         .build()
         .await?;
 
@@ -279,7 +279,7 @@ async fn fetch_wifi() -> zbus::Result<Vec<Device>> {
     // it is the one currently in use. Deactivation is addressed to the active
     // path, activation to the saved one, so both are needed.
     let manager = zbus::Proxy::new(&connection, NM, "/org/freedesktop/NetworkManager", NM).await?;
-    let active_paths: Vec<zbus::zvariant::OwnedObjectPath> = manager
+    let active_paths: Vec<zbus::OwnedObjectPath> = manager
         .get_property("ActiveConnections")
         .await
         .unwrap_or_default();
@@ -295,7 +295,7 @@ async fn fetch_wifi() -> zbus::Result<Vec<Device>> {
         )
         .await?;
         if let Ok(settings) = proxy
-            .get_property::<zbus::zvariant::OwnedObjectPath>("Connection")
+            .get_property::<zbus::OwnedObjectPath>("Connection")
             .await
         {
             active_for.insert(settings.to_string(), active.to_string());
@@ -309,7 +309,7 @@ async fn fetch_wifi() -> zbus::Result<Vec<Device>> {
         "org.freedesktop.NetworkManager.Settings",
     )
     .await?;
-    let saved: Vec<zbus::zvariant::OwnedObjectPath> = settings.call("ListConnections", &()).await?;
+    let saved: Vec<zbus::OwnedObjectPath> = settings.call("ListConnections", &()).await?;
 
     let mut networks = Vec::new();
     for path in saved {
@@ -320,12 +320,13 @@ async fn fetch_wifi() -> zbus::Result<Vec<Device>> {
             "org.freedesktop.NetworkManager.Settings.Connection",
         )
         .await?;
-        let Ok(config) = proxy
-            .call::<_, _, std::collections::HashMap<
-                String,
-                std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
-            >>("GetSettings", &())
-            .await
+        let Ok(config) =
+            proxy
+                .call::<_, _, std::collections::HashMap<
+                    String,
+                    std::collections::HashMap<String, zbus::OwnedVariant>,
+                >>("GetSettings", &())
+                .await
         else {
             continue;
         };
@@ -393,11 +394,11 @@ async fn wifi_activate(settings: &str) -> zbus::Result<()> {
     let connection = zbus::Connection::system().await?;
     let manager = zbus::Proxy::new(&connection, NM, "/org/freedesktop/NetworkManager", NM).await?;
 
-    let settings = zbus::zvariant::ObjectPath::try_from(settings).map_err(zbus::Error::Variant)?;
+    let settings = zbus::ObjectPath::try_from(settings)?;
     // "/" for the device and the specific object lets NetworkManager pick a
     // suitable radio itself, which is what `nmcli connection up` does.
-    let any = zbus::zvariant::ObjectPath::try_from("/").expect("root path is valid");
-    let _: zbus::zvariant::OwnedObjectPath = manager
+    let any = zbus::ObjectPath::try_from("/").expect("root path is valid");
+    let _: zbus::OwnedObjectPath = manager
         .call("ActivateConnection", &(&settings, &any, &any))
         .await?;
     Ok(())
@@ -408,7 +409,7 @@ async fn wifi_deactivate(active: &str) -> zbus::Result<()> {
     let connection = zbus::Connection::system().await?;
     let manager = zbus::Proxy::new(&connection, NM, "/org/freedesktop/NetworkManager", NM).await?;
 
-    let active = zbus::zvariant::ObjectPath::try_from(active).map_err(zbus::Error::Variant)?;
+    let active = zbus::ObjectPath::try_from(active)?;
     manager
         .call_method("DeactivateConnection", &(&active,))
         .await?;

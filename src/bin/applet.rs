@@ -133,7 +133,7 @@ async fn try_activate() -> Result<(), zbus::Error> {
     // An empty platform-data map: the launcher takes no startup token from us,
     // because the surface it maps is a layer shell surface rather than a window
     // that would need activation.
-    let platform_data: HashMap<&str, zbus::zvariant::Value<'_>> = HashMap::new();
+    let platform_data: HashMap<&str, zbus::Variant<'_>> = HashMap::new();
 
     connection
         .call_method(

@@ -478,7 +478,7 @@ async fn fetch_now_playing() -> zbus::Result<Option<String>> {
         return Ok(None);
     };
 
-    let metadata: std::collections::HashMap<String, zbus::zvariant::OwnedValue> = players[index]
+    let metadata: std::collections::HashMap<String, zbus::OwnedVariant> = players[index]
         .0
         .get_property("Metadata")
         .await
