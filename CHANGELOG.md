@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A plugin whose script was written a moment ago — just scaffolded, or saved
+  from an editor — no longer fails to run with "Text file busy" now and then.
+  Running it is retried briefly while another process still holds the script
+  open for writing. jump-core 2.1.3 carries the fix.
+
 ## [1.3.3] - 2026-11-01
 
 ### Changed

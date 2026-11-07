@@ -95,6 +95,29 @@ enum RunError {
     },
 }
 
+/// Spawn a plugin's command, waiting out a script that is still open for
+/// writing.
+///
+/// Executing a file that any process holds open for writing fails with
+/// ETXTBSY, and a script written a moment ago can be held that way after its
+/// writer has closed it: a child that another thread forked meanwhile keeps a
+/// copy of the descriptor until it execs. That happens to a plugin just made
+/// by [`scaffold`] or saved by an editor, and lasts milliseconds, so a few
+/// short retries cover it; any other error is returned at once.
+async fn spawn_plugin(command: &mut Command) -> std::io::Result<tokio::process::Child> {
+    let mut wait = Duration::from_millis(5);
+    for _ in 0..6 {
+        match command.spawn() {
+            Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                tokio::time::sleep(wait).await;
+                wait *= 2;
+            }
+            result => return result,
+        }
+    }
+    command.spawn()
+}
+
 /// Run a query command under `deadline` and the output cap, returning its
 /// stdout.
 ///
@@ -112,15 +135,17 @@ async fn run_query(
 ) -> Result<Vec<u8>, RunError> {
     use tokio::io::AsyncReadExt;
 
-    let mut child = Command::new(program)
-        .arg(text)
-        .current_dir(directory)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0)
-        .kill_on_drop(true)
-        .spawn()?;
+    let mut child = spawn_plugin(
+        Command::new(program)
+            .arg(text)
+            .current_dir(directory)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .process_group(0)
+            .kill_on_drop(true),
+    )
+    .await?;
     // The group id is the child's pid, which cannot be reused while the
     // child or anything else in its group is alive.
     let mut group = GroupKill(child.id());
@@ -561,27 +586,28 @@ impl Plugin {
             ),
         };
 
-        let result = Command::new(&program)
+        let mut command = Command::new(&program);
+        command
             .envs(variables.iter().map(|(key, value)| (key, value)))
             .args(extra)
             .arg(arg)
             .current_dir(&self.directory)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
+            .stderr(Stdio::null());
 
-        match result {
-            Ok(mut child) => {
-                // Reap in the background so the child does not become a zombie.
-                tokio::spawn(async move {
+        let id = self.id.clone();
+        tokio::spawn(async move {
+            match spawn_plugin(&mut command).await {
+                // Waited on so the child does not become a zombie.
+                Ok(mut child) => {
                     let _ = child.wait().await;
-                });
+                }
+                Err(error) => {
+                    tracing::error!(plugin = %id, ?program, %error, "failed to activate plugin item");
+                }
             }
-            Err(error) => {
-                tracing::error!(plugin = %self.id, ?program, %error, "failed to activate plugin item");
-            }
-        }
+        });
     }
 }
 
@@ -1346,6 +1372,33 @@ mod tests {
         let item = &response["items"][0];
         assert_eq!(item["subtitle"], name);
         assert_eq!(item["title"], r#"Hello say "hi" \"#);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_query_script_still_open_for_writing_runs_once_it_is_closed() {
+        // Executing a file that any process holds open for writing fails with
+        // ETXTBSY. A script just written can be held that way for a moment
+        // after its writer closes it — a child forked by another thread keeps
+        // the descriptor until it execs — which made a freshly scaffolded
+        // plugin fail its lint now and then.
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("tempdir");
+        let script = root.path().join("search.sh");
+        let mut held = std::fs::File::create(&script).expect("create");
+        held.write_all(b"#!/bin/sh\nprintf ok\n").expect("write");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            drop(held);
+        });
+
+        let stdout = run_query(&script, root.path(), "", Duration::from_secs(3))
+            .await
+            .expect("the query runs once the writer has closed the script");
+        assert_eq!(stdout, b"ok");
+        release.join().expect("release thread");
     }
 
     #[test]
