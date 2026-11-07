@@ -2871,7 +2871,7 @@ dependencies = [
 
 [[package]]
 name = "jump"
-version = "1.3.3"
+version = "1.3.4"
 dependencies = [
  "cosmic-launch",
  "dirs 7.0.0",
