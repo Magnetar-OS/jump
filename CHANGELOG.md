@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Rebuilt against the current COSMIC libraries (libcosmic `be7937d`).
 - Built with Rust 1.100.0, now the minimum supported version (was 1.99.1).
 - Built on zbus 6.4, rusqlite 0.43, notify 8.2.2 and plist 1.10.4.
   jump-core 2.1.4 carries the rusqlite move.
