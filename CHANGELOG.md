@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.3.5] - 2026-11-20
+
 ### Changed
 
 - Rebuilt against the current COSMIC libraries (libcosmic `be7937d`).
@@ -304,7 +306,8 @@ All notable changes to this project are documented here. The format follows
   updates with Alfred's `rerun` (re-query on an interval, clamped 0.5–5 s,
   while the query is on screen).
 
-[Unreleased]: https://github.com/Magnetar-OS/jump/compare/v1.3.4...HEAD
+[Unreleased]: https://github.com/Magnetar-OS/jump/compare/v1.3.5...HEAD
+[1.3.5]: https://github.com/Magnetar-OS/jump/compare/v1.3.4...v1.3.5
 [1.3.4]: https://github.com/Magnetar-OS/jump/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/Magnetar-OS/jump/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/Magnetar-OS/jump/compare/v1.3.1...v1.3.2
