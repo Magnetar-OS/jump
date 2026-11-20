@@ -74,6 +74,11 @@ jobs:
       product_name: 'jump'
       repo_name: 'magnetar'
       pages_repo: 'Magnetar-OS/arch-repo'
+      # No superseded version stays in [magnetar]: with one kept for every
+      # package on both architectures the site passed the 950 MiB the kit
+      # allows under GitHub Pages' 1 GB limit (2026-11-21). An older version
+      # stays downloadable from its GitHub release.
+      keep: '0'
     secrets:
       ARCH_REPO_TOKEN: ${{ secrets.ARCH_REPO_TOKEN }}
       RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
