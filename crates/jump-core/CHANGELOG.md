@@ -5,6 +5,14 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate
 follows [Semantic Versioning](https://semver.org/). The `jump` application
 keeps its own changelog at the repository root.
 
+## [2.1.4] - 2026-11-21
+
+### Changed
+
+- Reads and writes its indexes through rusqlite 0.43 (bundled SQLite). An
+  application linking rusqlite itself has to be on 0.43 too.
+- The minimum supported Rust version is 1.100.0, raised from 1.99.1.
+
 ## [2.1.0] - Unreleased
 
 Prepared, not yet published to crates.io.

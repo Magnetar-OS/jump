@@ -3,7 +3,7 @@ members = ["crates/jump-core"]
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.99.1"
+rust-version = "1.100.0"
 repository = "https://github.com/Magnetar-OS/jump"
 
 [workspace.dependencies]
@@ -49,12 +49,12 @@ path = "src/bin/settings.rs"
 jump-core = { path = "crates/jump-core" }
 
 # The applet activates the launcher over D-Bus rather than spawning a process.
-zbus = { version = "6.2", default-features = false, features = ["tokio"] }
+zbus = { version = "6.4", default-features = false, features = ["tokio"] }
 
 # Alfred workflow import (`jump plugin import`): the bundle's info.plist is an
 # Apple property list. Tooling-only, which is why this lives in the binary
 # crate — the MPL engine stays dependency-light for the future GTK frontend.
-plist = "1.10.3"
+plist = "1.10.4"
 thiserror = "2"
 # Private 0700 extraction dir with an unpredictable name; a predictable path
 # in shared /tmp is a symlink target.
@@ -73,7 +73,7 @@ cosmic-launch = { git = "https://github.com/pop-os/libcosmic.git" }
 # Plugin directories are watched so a newly installed plugin works without a
 # restart. Already in the tree through cosmic-config, which watches its store
 # the same way.
-notify = "8.2.1"
+notify = "8.2.2"
 
 # Settings live in cosmic-config; `dirs` is still needed for index and history
 # paths under the XDG data directory.
@@ -92,7 +92,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
 i18n-embed-fl = "0.10"
-rust-embed = "8.13"
+rust-embed = "8.14"
 ksni = "0.3"
 
 [dependencies.libcosmic]
