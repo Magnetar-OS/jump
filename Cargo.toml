@@ -49,7 +49,7 @@ path = "src/bin/settings.rs"
 jump-core = { path = "crates/jump-core" }
 
 # The applet activates the launcher over D-Bus rather than spawning a process.
-zbus = { version = "6.4", default-features = false, features = ["tokio"] }
+zbus = { version = "6.5", default-features = false, features = ["tokio"] }
 
 # Alfred workflow import (`jump plugin import`): the bundle's info.plist is an
 # Apple property list. Tooling-only, which is why this lives in the binary
